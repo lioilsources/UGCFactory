@@ -1,0 +1,6 @@
+ugc-api
+*.db
+*.db-*
+data/
+cloudflared/credentials.json
+.env

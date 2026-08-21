@@ -1,0 +1,54 @@
+# UGC backend stack na JODA - vedle media stacku (viz UGC_NAS_PLAN.md).
+#
+#   cp .env.example .env                # DATA_DIR, SPARK_* az bude ImageStudio
+#   # tunnel credentials do cloudflared/credentials.json (neni v gitu)
+#   docker compose -f ugc-stack.yaml up -d --build
+#
+# ugc.ol1n.com bezi pres dedikovany tunnel "ugc-nas" (stejny vzor jako
+# finetune.ol1n.com). LAN pristup: http://joda:8095 bez tunelu.
+# Worker skaluje replikami: docker compose -f ugc-stack.yaml up -d --scale ugc-blender=2
+
+services:
+  ugc-api:
+    build: .
+    image: ugc-api:latest
+    container_name: ugc-api
+    restart: unless-stopped
+    environment:
+      - UGC_ADDR=:8095
+      - UGC_DATA=/data
+      - SPARK_GENERATE_URL=${SPARK_GENERATE_URL:-}
+      - SPARK_CF_CLIENT_ID=${SPARK_CF_CLIENT_ID:-}
+      - SPARK_CF_CLIENT_SECRET=${SPARK_CF_CLIENT_SECRET:-}
+    volumes:
+      - ${DATA_DIR:-/media/storage/ugc}:/data
+    ports:
+      - "8095:8095"        # LAN pristup bez tunelu
+    networks: [ugc]
+
+  ugc-blender:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: ugc-blender:latest
+    restart: unless-stopped
+    environment:
+      - UGC_API=http://ugc-api:8095
+      - UGC_DATA=/data
+    volumes:
+      - ${DATA_DIR:-/media/storage/ugc}:/data
+    networks: [ugc]
+    depends_on: [ugc-api]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ugc-cloudflared
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    networks: [ugc]
+    depends_on: [ugc-api]
+
+networks:
+  ugc:
