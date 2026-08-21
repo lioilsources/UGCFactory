@@ -70,7 +70,13 @@ def has_uv(obj):
 def retopo(obj, backend, max_tris):
     """SF3D uz je low-poly s UV -> jen pripadny decimate. Jinak voxel remesh
     (zavre diry, sjednoti skorapky - stejna lekce jako blackwell_fix na
-    Sparku) a decimate na cil."""
+    Sparku) a decimate na cil.
+
+    Decimate modifikator pocita FACES, limit Robloxu jsou TROJUHELNIKY -
+    a voxel remesh vraci quady (2 tris/face). Proto se mesh nejdriv
+    triangulizuje a decimate bezi ve smycce, dokud neni pod cilem
+    (prakticky 1-2 pruchody). Bez toho front plate vysel na 6398 tris
+    pri "3600" faces."""
     target = int(max_tris * DECIMATE_TARGET_FRACTION)
     if backend != "sf3d":
         dims = obj.dimensions
@@ -79,8 +85,14 @@ def retopo(obj, backend, max_tris):
         mod.mode = "VOXEL"
         mod.voxel_size = voxel
         bpy.ops.object.modifier_apply(modifier=mod.name)
-    tris = tri_count(obj)
-    if tris > target:
+
+    mod = obj.modifiers.new("Tri", "TRIANGULATE")
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+    for _ in range(4):
+        tris = tri_count(obj)
+        if tris <= target:
+            break
         mod = obj.modifiers.new("Decimate", "DECIMATE")
         mod.ratio = target / tris
         bpy.ops.object.modifier_apply(modifier=mod.name)

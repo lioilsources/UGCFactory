@@ -69,6 +69,7 @@ func main() {
 	mux.HandleFunc("GET /jobs/{id}/glb", s.handleGLB)
 	mux.HandleFunc("POST /jobs/{id}/approve", s.handleApprove)
 	mux.HandleFunc("POST /jobs/{id}/reject", s.handleReject)
+	mux.HandleFunc("POST /jobs/{id}/reconvert", s.handleReconvert)
 	mux.HandleFunc("POST /jobs/{id}/reroll", s.handleReroll)
 	mux.HandleFunc("POST /generate", s.handleGenerate)
 	mux.HandleFunc("GET /items", s.handleListItems)
@@ -265,8 +266,9 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch job.Status {
-	case "new":
-		if ok, err := s.store.SetJobStatus(job.ID, "approved", "new"); err != nil || !ok {
+	case "new", "failed":
+		// failed -> approved je retry konverze (napr. po oprave convert.py)
+		if ok, err := s.store.SetJobStatus(job.ID, "approved", "new", "failed"); err != nil || !ok {
 			httpErr(w, http.StatusConflict, "cannot approve: %v", err)
 			return
 		}
@@ -277,6 +279,22 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		httpErr(w, http.StatusConflict, "cannot approve job in status %q", job.Status)
+		return
+	}
+	job, _ = s.store.GetJob(job.ID)
+	s.broker.Publish("job.updated", job)
+	writeJSON(w, http.StatusOK, job)
+}
+
+// handleReconvert sends a converted-or-failed job through the worker again —
+// the recovery path after a convert.py fix.
+func (s *Server) handleReconvert(w http.ResponseWriter, r *http.Request) {
+	job := s.jobOr404(w, r.PathValue("id"))
+	if job == nil {
+		return
+	}
+	if ok, err := s.store.SetJobStatus(job.ID, "approved", "converted", "failed"); err != nil || !ok {
+		httpErr(w, http.StatusConflict, "cannot reconvert from %q: %v", job.Status, err)
 		return
 	}
 	job, _ = s.store.GetJob(job.ID)
