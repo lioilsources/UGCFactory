@@ -4,8 +4,14 @@
 #   ./golden_test.sh
 set -e
 cd "$(dirname "$0")"
-WORK=$(mktemp -d)
-trap "rm -rf $WORK" EXIT
+# /tmp nelze mountovat do snap dockeru (privatni namespace) - pracovat pod $HOME
+WORK=$(mktemp -d "$HOME/.ugc-golden.XXXXXX")
+# container pise jako root - uklid musi taky pres container, jinak Permission denied
+cleanup() {
+	docker run --rm -v "$WORK:/w" --entrypoint /bin/sh ugc-blender:latest 		-c "rm -rf /w/converted /w/incoming /w/jobs" >/dev/null 2>&1 || true
+	rm -rf "$WORK"
+}
+trap cleanup EXIT
 mkdir -p "$WORK/incoming/golden" "$WORK/jobs"
 
 docker run --rm -v "$WORK:/data" -v "$PWD/testdata:/testdata:ro" ugc-blender:latest \

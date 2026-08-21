@@ -21,7 +21,7 @@ services:
       - SPARK_CF_CLIENT_ID=${SPARK_CF_CLIENT_ID:-}
       - SPARK_CF_CLIENT_SECRET=${SPARK_CF_CLIENT_SECRET:-}
     volumes:
-      - ${DATA_DIR:-/media/storage/ugc}:/data
+      - ${DATA_DIR:?set DATA_DIR in .env}:/data
     ports:
       - "8095:8095"        # LAN pristup bez tunelu
     networks: [ugc]
@@ -36,7 +36,7 @@ services:
       - UGC_API=http://ugc-api:8095
       - UGC_DATA=/data
     volumes:
-      - ${DATA_DIR:-/media/storage/ugc}:/data
+      - ${DATA_DIR:?set DATA_DIR in .env}:/data
     networks: [ugc]
     depends_on: [ugc-api]
 

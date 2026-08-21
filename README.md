@@ -22,7 +22,8 @@ Spark ──POST /jobs──▶ ugc-api ◀──SSE/triage── Flutter appka
 | `ugc-blender` | worker: poll → `blender -b convert.py` → validate → verdict |
 | `cloudflared` | dedikovaný tunnel `ugc-nas` → ugc.ol1n.com (vzor finetune) |
 
-Storage: `/media/storage/ugc/{incoming,converted,packed,rejected,jobs}` +
+Storage: `$DATA_DIR/{incoming,converted,packed,rejected,jobs}` (viz .env; snap
+docker na JODA vidí jen `/home` a `/media` — `/pool` mountovat nejde) +
 `ugc.db` (SQLite WAL). Jediný cenný adresář je `packed/` — patří do NAS záloh.
 
 ## API kontrakt
