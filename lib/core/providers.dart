@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,12 +10,17 @@ import 'models.dart';
 /// k tomu neni potreba. LAN alternativa: http://192.168.88.88:8095
 const defaultBaseUrl = 'http://joda.tailde0de8.ts.net:8095';
 
+/// Web build servíruje samo ugc-api na /app/, takze API je na stejnem
+/// originu - prazdny base URL znamena relativni cesty a zadne CORS ani
+/// druhou auth (Access cookie plati pro cely origin).
+String get initialBaseUrl => kIsWeb ? '' : defaultBaseUrl;
+
 final prefsProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('overridden in main'),
 );
 
 final baseUrlProvider = StateProvider<String>((ref) {
-  return ref.watch(prefsProvider).getString('baseUrl') ?? defaultBaseUrl;
+  return ref.watch(prefsProvider).getString('baseUrl') ?? initialBaseUrl;
 });
 
 final apiProvider = Provider<UgcApi>((ref) {
