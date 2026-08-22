@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ugc-api bezi po tailnetu/LAN bez TLS. Cleartext povolujeme adresne
+     jen pro nej, ne globalne. Pres ugc.ol1n.com jede HTTPS normalne. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">joda.tailde0de8.ts.net</domain>
+        <domain includeSubdomains="false">192.168.88.88</domain>
+        <domain includeSubdomains="false">100.126.96.36</domain>
+    </domain-config>
+</network-security-config>

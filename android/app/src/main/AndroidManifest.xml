@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Flutter dava INTERNET jen do debug manifestu; release APK by bez
+         tohoto radku nedosahl na API. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="ugc_studio"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:label="UGC Studio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
