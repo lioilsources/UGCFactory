@@ -22,8 +22,21 @@ deploy-nas:
 	$(RSYNC) --exclude cloudflared/credentials.json nas/ $(NAS):$(NAS_DIR)/
 	@ssh $(NAS) 'test -s $(NAS_DIR)/cloudflared/credentials.json' \
 		|| echo "POZOR: chybi $(NAS_DIR)/cloudflared/credentials.json - tunnel nenabehne"
-	ssh $(NAS) 'cd $(NAS_DIR) && test -f .env || cp .env.example .env; \
+	@# .env se NIKDY neprepisuje (drzi tajemstvi), ale chybejici klice se
+	@# doplni ze sablony - jinak stary .env tise vynecha novy parametr
+	@# a projevi se to az za behu ("SPARK_GENERATE_URL not configured").
+	ssh $(NAS) 'cd $(NAS_DIR) && touch .env && \
+		while IFS= read -r line; do \
+			case "$$line" in \
+				\#*|"") continue;; \
+			esac; \
+			key=$${line%%=*}; \
+			grep -q "^$$key=" .env || { echo "$$line" >> .env; echo "  .env: doplnen $$key"; }; \
+		done < .env.example; \
 		docker compose -f ugc-stack.yaml up -d --build'
+	@ssh $(NAS) 'cd $(NAS_DIR); for k in DATA_DIR SPARK_GENERATE_URL; do \
+		grep -q "^$$k=." .env || echo "POZOR: $$k je v .env prazdny"; done'
+
 
 deploy-spark:
 	ssh $(SPARK) 'mkdir -p $(SPARK_DIR)'
