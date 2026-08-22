@@ -51,6 +51,12 @@ app-web:
 app-android:
 	cd app && flutter build apk --release && flutter install --release
 
+# iOS jde nasadit i bezdratove (zarizeni sparovane pres Xcode). Podepisuje
+# se automaticky tymem P82HWPG7FN z Runner.xcodeproj.
+IPHONE ?= 00008101-001175D90AA0001E
+app-ios:
+	cd app && flutter build ios --release && flutter install -d $(IPHONE) --release
+
 status:
 	@echo "== NAS ugc-api ==";     ssh $(NAS) 'curl -s localhost:8095/healthz' || true; echo
 	@echo "== NAS blender ==";     ssh $(NAS) 'docker ps --filter name=blender --format "{{.Status}}"' || true
