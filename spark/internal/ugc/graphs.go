@@ -87,6 +87,14 @@ func node(class string, inputs in) map[string]any {
 
 func ref(id string, slot int) []any { return []any{id, slot} }
 
+// artNegatives jsou vady, ktere Illustrious pridava sam od sebe, protoze je
+// trenovany na "weapon sheet" ilustracich: ozdobne ramy, vic pohledu na jednu
+// zbran a falesne podpisy/copyright. Vsechny se do meshe zamodeluji jako
+// geometrie navic (overeno na kolekci Beast Arsenal 2026-08-22).
+const artNegatives = "border, frame, ornate frame, weapon sheet, reference sheet, " +
+	"multiple views, turnaround, collection, lineup, artist name, copyright, " +
+	"english text, japanese text, label, caption"
+
 // isSet pozna item slozeny z vic kusu (dvojice cepeli, mec + stit).
 // U nich se nesmi vynucovat "single object" a negativ "multiple objects" -
 // jinak model jeden z kusu zahodi.
@@ -112,7 +120,7 @@ func PromptFor(category, style, prompt string) (positive, negative string) {
 			prompt, style)
 		neg := "1girl, 1boy, solo, character, full body, portrait, head, face, " +
 			"hands, holding, wearing, mannequin, text, watermark, signature, " +
-			"logo, cropped, blurry, child, loli, nsfw"
+			"logo, cropped, blurry, child, loli, nsfw, " + artNegatives
 		return pos, neg
 	}
 
@@ -122,13 +130,13 @@ func PromptFor(category, style, prompt string) (positive, negative string) {
 	// dialektem (1girl/1boy/solo). Overeno: bez toho prisel bust i cely ninja.
 	base := fmt.Sprintf(
 		"masterpiece, best quality, no humans, still life, object focus, "+
-			"%s, %s, single object, centered, simple background, "+
-			"white background, game asset",
+			"%s, %s, single object, only one, isolated on plain background, "+
+			"centered, simple background, white background, game asset",
 		prompt, style)
 	neg := "1girl, 1boy, solo, multiple girls, multiple boys, character, " +
 		"full body, portrait, head, face, hands, mannequin, wearing, " +
-		"text, watermark, signature, logo, multiple objects, cropped, " +
-		"blurry, child, loli, nsfw"
+		"text, watermark, signature, logo, multiple objects, two weapons, " +
+		"duplicate, cropped, blurry, child, loli, nsfw, " + artNegatives
 	_ = category
 	return base, neg
 }
