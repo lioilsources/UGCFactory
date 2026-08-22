@@ -35,11 +35,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             controller: _urlCtrl,
             decoration: const InputDecoration(
               labelText: 'ugc-api URL',
-              helperText:
-                  'LAN: http://192.168.88.88:8095 - pres tunnel: https://ugc.ol1n.com',
+              helperText: 'Tailscale (kdekoli): http://joda.tailde0de8.ts.net:8095'
+                  '\nLAN: http://192.168.88.88:8095',
               border: OutlineInputBorder(),
             ),
             keyboardType: TextInputType.url,
+            maxLines: null,
           ),
           const SizedBox(height: 12),
           FilledButton(

@@ -22,7 +22,8 @@ flutter pub get
 flutter run -d macos    # nebo -d <iphone>
 ```
 
-První přístup na NAS vyvolá na macOS/iOS dotaz na **Local Network** —
+Na telefonu musí být zapnutý **Tailscale** (jinak tailnet jméno nedosáhne).
+Při přístupu na LAN adresu vyvolá macOS/iOS dotaz na **Local Network** —
 povolit, jinak jsou pakety tiše zahozené (Sequoia). CLI smoke test
 (`dart run tool/smoke.dart`) na macOS narazí na stejný gate; API si ověř
 raději curlem.

@@ -4,9 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'models.dart';
 
-/// Vychozi je LAN adresa JODA; az pojede tunnel, prepne se v Nastaveni
-/// na https://ugc.ol1n.com.
-const defaultBaseUrl = 'http://192.168.88.88:8095';
+/// Vychozi je tailnet adresa JODA: funguje doma i z mobilnich dat, protoze
+/// Tailscale bezi na NASu, Sparku, Macu i telefonu. Zadny Cloudflare tunnel
+/// k tomu neni potreba. LAN alternativa: http://192.168.88.88:8095
+const defaultBaseUrl = 'http://joda.tailde0de8.ts.net:8095';
 
 final prefsProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('overridden in main'),
