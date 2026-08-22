@@ -1,0 +1,73 @@
+# UGCFactory 🏭
+
+Továrna na Roblox UGC itemy: z promptu vznikne texturovaný 3D model,
+zkonvertovaný do robloxích limitů a zabalený k nahrání na Marketplace.
+Tři stroje, jedno repo.
+
+```
+        ┌──────────── SPARK (GB10, GPU) ────────────┐
+prompt →│ ComfyUI: Illustrious → RMBG → TRELLIS.2    │→ texturovaný GLB
+        │ ugc-pipeline :8092                        │      │
+        └───────────────────────────────────────────┘      │ push
+                                                           ▼
+        ┌──────────── NAS / JODA (24/7) ────────────────────────┐
+        │ ugc-api :8095   fronta, triage, katalog, SSE, balení   │
+        │ ugc-blender     GLB → FBX (≤4k tris, UV, bake)         │
+        │ cloudflared     ugc.ol1n.com za Cloudflare Access      │
+        └────────────────────────────────────────────────────────┘
+             ▲ swipe triage                    │ packed zip
+        ┌────┴─────────────┐          ┌────────▼──────────┐
+        │ app (Flutter)    │          │ Mac: Roblox Studio│
+        │ Android/iOS/web  │          │ import + submission│
+        └──────────────────┘          └───────────────────┘
+```
+
+## Struktura
+
+| Adresář | Co to je |
+|---|---|
+| `spark/` | Go služba `ugc-pipeline` — koncept → cleanplate → GLB → push na NAS, plus ověřené ComfyUI workflow šablony |
+| `nas/` | Go `ugc-api` + headless Blender worker + compose stack + Cloudflare tunnel |
+| `app/` | Flutter appka `ugc_studio` — Composer, fronta, swipe triage (Android, iOS, macOS, web) |
+| `docs/` | smoke test REPORT.md, licence img→3D backendů |
+
+## Nasazení
+
+```bash
+make deploy-nas      # ugc-api + blender worker + tunnel na JODA
+make deploy-spark    # ugc-pipeline na SPARK
+make app-web         # web build appky → nas/web → redeploy (mobil bez Xcode)
+make app-android     # APK na připojený telefon
+make status          # zdraví všech služeb
+make test            # Go testy + flutter test
+```
+
+## Přístup k appce
+
+| Kudy | Adresa | Podmínka |
+|---|---|---|
+| mobil / prohlížeč | `http://joda.tailde0de8.ts.net:8095/app/` | zapnutý Tailscale |
+| odkudkoli | `https://ugc.ol1n.com/app/` | přihlášení přes Cloudflare Access |
+| nativní Android | `make app-android` | připojený telefon |
+
+## Provozní znalosti (draze zaplacené)
+
+- **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí
+  „success". `Trellis2UnWrapAndRasterizer` **musí** dostat `bvh` z generátoru.
+  Validační chyby jsou v odpovědi na `POST /prompt` — číst je.
+- **Illustrious mluví danbooru tagy**, ne anglicky. `no humans, still life,
+  object focus` funguje; „no character" nakreslí item na bustě.
+- **Decimate počítá faces, Roblox trojúhelníky** — triangulovat před decimací.
+  Fragmentovaný mesh (ořezaný koncept) se pod limit nedostane vůbec.
+- **Docker na JODA je snap** — mountovat jde jen `/home` a `/media`;
+  `/pool` i `/tmp` se tiše vyprázdní.
+- `cloudflared/credentials.json` musí být **0444** (konektor běží jako uid
+  65532); jinak error 1033.
+- Token v `cert.pem` umí jen tunely a DNS — na Access apps je potřeba
+  API token s `Access: Apps and Policies: Edit`.
+
+## Historie
+
+Vzniklo ze čtyř plánů (UGC_NAS / UGC_SPARK / UGC_FORGE / UGC_STUDIO_APP)
+sloučením repozitářů `ugc-backend` a `ugc_studio` (historie zachována přes
+`git subtree`) a vyjmutím UGC pipeline z `AiStack/gen-queue`.
