@@ -1,6 +1,9 @@
 package ugc
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Concept graph: checkpoint -> prompt -> KSampler -> PNG. Illustrious-style
 // defaults; the prompt template frames the item as a single centred game
@@ -84,8 +87,35 @@ func node(class string, inputs in) map[string]any {
 
 func ref(id string, slot int) []any { return []any{id, slot} }
 
+// isSet pozna item slozeny z vic kusu (dvojice cepeli, mec + stit).
+// U nich se nesmi vynucovat "single object" a negativ "multiple objects" -
+// jinak model jeden z kusu zahodi.
+func isSet(prompt string) bool {
+	p := strings.ToLower(prompt)
+	for _, kw := range []string{"pair", "dual", "twin", "and shield", "set of", "matching"} {
+		if strings.Contains(p, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // PromptFor skladá finální prompt konceptu z kategorie a stylu.
 func PromptFor(category, style, prompt string) (positive, negative string) {
+	if isSet(prompt) {
+		// Kusy musi byt vedle sebe a nepretinat se, aby z nich TRELLIS
+		// udelal jeden souvisly mesh misto dvou kusu v jednom prostoru.
+		pos := fmt.Sprintf(
+			"masterpiece, best quality, no humans, still life, object focus, "+
+				"%s, %s, arranged side by side, not overlapping, "+
+				"centered, simple background, white background, game asset",
+			prompt, style)
+		neg := "1girl, 1boy, solo, character, full body, portrait, head, face, " +
+			"hands, holding, wearing, mannequin, text, watermark, signature, " +
+			"logo, cropped, blurry, child, loli, nsfw"
+		return pos, neg
+	}
+
 	// Illustrious/Pony jsou danbooru modely - anglicke vety ("no character",
 	// "empty item") ignoruji a kresli postavy dal. Funguje doslovny tag
 	// "no humans" + "still life"/"object focus"; negativ mluvi stejnym

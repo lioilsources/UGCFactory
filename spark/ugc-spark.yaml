@@ -4,6 +4,8 @@
 #
 # Serializovany worker zamerne: img->3D soubezne s dalsi generaci je znamy
 # power-spike pad GB10.
+# Jmeno projektu explicitne - bez nej ho compose bere z adresare ("spark"),
+# a pri prejmenovani pak koliduje container_name s uz beziciho instanci.
 name: ugcfactory-spark
 
 services:
