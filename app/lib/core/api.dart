@@ -72,6 +72,11 @@ class UgcApi {
 
   String previewUrl(String id) => '$baseUrl/jobs/$id/preview';
 
+  /// GLB pro 3D prohlizec. Na webu je baseUrl prazdny (stejny origin),
+  /// takze model-viewer potrebuje absolutni cestu od korene.
+  String glbUrl(String id) =>
+      baseUrl.isEmpty ? '/jobs/$id/glb' : '$baseUrl/jobs/$id/glb';
+
   /// SSE stream /events - kazdy event je {"event": "...", "data": {...}}.
   /// Pri vypadku se reconnectuje s backoff; stream nikdy nekonci sam.
   Stream<Map<String, dynamic>> events() async* {

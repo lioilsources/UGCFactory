@@ -4,6 +4,8 @@
 #
 # Serializovany worker zamerne: img->3D soubezne s dalsi generaci je znamy
 # power-spike pad GB10.
+name: ugcfactory-spark
+
 services:
   ugc-pipeline:
     build: .

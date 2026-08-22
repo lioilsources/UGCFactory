@@ -8,6 +8,10 @@
 # finetune.ol1n.com). LAN pristup: http://joda:8095 bez tunelu.
 # Worker skaluje replikami: docker compose -f ugc-stack.yaml up -d --scale ugc-blender=2
 
+# Jmeno projektu explicitne: bez nej compose bere adresar, a "nas/" v
+# monorepu koliduje s existujicim stackem bipolar (~/deploy/bipolar/nas).
+name: ugcfactory
+
 services:
   ugc-api:
     build: .

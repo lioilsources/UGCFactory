@@ -72,6 +72,7 @@ func main() {
 	mux.HandleFunc("POST /jobs/{id}/reconvert", s.handleReconvert)
 	mux.HandleFunc("POST /jobs/{id}/reroll", s.handleReroll)
 	mux.HandleFunc("POST /generate", s.handleGenerate)
+	mux.HandleFunc("GET /pipeline/jobs", s.handlePipelineJobs)
 	mux.HandleFunc("GET /items", s.handleListItems)
 	mux.HandleFunc("PATCH /items/{id}", s.handlePatchItem)
 	mux.HandleFunc("GET /packed/{id}/download", s.handleDownload)
@@ -390,6 +391,35 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
+}
+
+// handlePipelineJobs proxies Spark's in-flight jobs. Bez toho appka nevidi
+// nic, dokud mesh nedobehne a nedorazi push - a hrac se prave ptal "kde
+// mam ty helmy?", kdyz se jeste generovaly.
+func (s *Server) handlePipelineJobs(w http.ResponseWriter, r *http.Request) {
+	if s.spark.GenerateURL == "" {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	url := strings.TrimSuffix(s.spark.GenerateURL, "/ugc/generate") + "/ugc/jobs"
+	req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	if s.spark.ClientID != "" {
+		req.Header.Set("CF-Access-Client-Id", s.spark.ClientID)
+		req.Header.Set("CF-Access-Client-Secret", s.spark.ClientSecret)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		// Spark muze byt vypnuty - to neni chyba appky, jen prazdny seznam
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, io.LimitReader(resp.Body, 1<<20))
 }
 
 func (s *Server) callSpark(payload []byte) error {

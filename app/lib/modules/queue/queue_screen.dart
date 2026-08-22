@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models.dart';
+import '../../core/pipeline.dart';
 import '../../core/providers.dart';
+import '../review/review_screen.dart';
 
 /// Zivy prehled fronty: joby seskupene podle stavu, SSE drzi data cerstva.
 class QueueScreen extends ConsumerWidget {
@@ -36,12 +38,19 @@ class QueueScreen extends ConsumerWidget {
           }
           final sections = _order.where(byStatus.containsKey).toList();
           if (sections.isEmpty) {
-            return const Center(child: Text('Fronta je prazdna.'));
+            return ListView(children: const [
+              _SparkSection(),
+              Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: Text('Na NASu zatim nic - posli batch v Composeru.')),
+              ),
+            ]);
           }
           return RefreshIndicator(
             onRefresh: () => ref.read(jobsProvider.notifier).refresh(),
             child: ListView(
               children: [
+                const _SparkSection(),
                 for (final status in sections) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -88,6 +97,9 @@ class _JobTile extends ConsumerWidget {
       _ => null,
     };
     return ListTile(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ReviewScreen(job: job),
+      )),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Image.network(
@@ -143,6 +155,39 @@ class _JobTile extends ConsumerWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Joby, ktere se prave vari na Sparku. Na NAS dorazi az hotove, takze
+/// bez teto sekce appka behem generovani (~4 min) neukazuje nic.
+class _SparkSection extends ConsumerWidget {
+  const _SparkSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final jobs = ref.watch(pipelineJobsProvider).value ?? const <PipelineJob>[];
+    if (jobs.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Text('Vyrabi se na Sparku (${jobs.length})',
+              style: Theme.of(context).textTheme.titleMedium),
+        ),
+        for (final j in jobs)
+          ListTile(
+            leading: const SizedBox(
+              width: 28, height: 28,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            title: Text(j.prompt, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text('${j.category} - ${j.stageLabel}'),
+          ),
+        const Divider(height: 24),
+      ],
     );
   }
 }

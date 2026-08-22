@@ -14,9 +14,14 @@ RSYNC := rsync -a --exclude .git --exclude __pycache__ --exclude build
 
 .PHONY: deploy-nas deploy-spark app-web app-android status test
 
+# credentials.json je mimo git (tunnel secret) - deploy ho nesmi prepsat
+# ani ztratit; pri prvnim nasazeni ho tam poloz rucne s pravy 0444
+# (konektor bezi jako uid 65532 a na 0400 dostane permission denied).
 deploy-nas:
-	ssh $(NAS) 'mkdir -p $(NAS_DIR)'
-	$(RSYNC) nas/ $(NAS):$(NAS_DIR)/
+	ssh $(NAS) 'mkdir -p $(NAS_DIR)/cloudflared'
+	$(RSYNC) --exclude cloudflared/credentials.json nas/ $(NAS):$(NAS_DIR)/
+	@ssh $(NAS) 'test -s $(NAS_DIR)/cloudflared/credentials.json' \
+		|| echo "POZOR: chybi $(NAS_DIR)/cloudflared/credentials.json - tunnel nenabehne"
 	ssh $(NAS) 'cd $(NAS_DIR) && test -f .env || cp .env.example .env; \
 		docker compose -f ugc-stack.yaml up -d --build'
 
