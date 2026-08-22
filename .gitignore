@@ -1,0 +1,3 @@
+nas/web/
+**/build/
+.DS_Store

@@ -1,0 +1,32 @@
+# Vstup tovarny na SPARKu (GB10). Bezi vedle ComfyUI, ktere je na hostu.
+#
+#   docker compose -f ugc-spark.yaml up -d --build
+#
+# Serializovany worker zamerne: img->3D soubezne s dalsi generaci je znamy
+# power-spike pad GB10.
+services:
+  ugc-pipeline:
+    build: .
+    image: ugc-pipeline:latest
+    container_name: ugc-pipeline
+    restart: unless-stopped
+    environment:
+      - UGC_ADDR=:8092
+      - UGC_COMFY_URL=${UGC_COMFY_URL:-http://host.docker.internal:8188}
+      - UGC_NAS_URL=${UGC_NAS_URL:-http://192.168.88.88:8095}
+      - UGC_CHECKPOINT=${UGC_CHECKPOINT:-Illustrious-XL-v2.0.safetensors}
+      - UGC_SPOOL=/spool
+    volumes:
+      - ugc-spool:/spool
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8092:8092"   # NAS sem vola reroll/generate
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ugc-spool:
