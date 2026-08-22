@@ -1,9 +1,9 @@
 # Cloudflare Tunnel - ugc-nas (bezi v ugc-stack compose na JODA).
 # credentials.json NENI v gitu - poloz ho vedle tohoto souboru.
 # Vzor: finetune.ol1n.com (Access JWT vynucovany uz na konektoru).
-# TUNNEL_ID a AUD_TAG doplni deploy krok - viz README.
+# Tunnel ugc-nas + Access app "ugc" zalozeny 2026-08-22 (CLI, AccessApp token).
 
-tunnel: TUNNEL_ID
+tunnel: 12f5f9f6-28e2-43e6-a192-7774ec2ea326
 credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
@@ -16,5 +16,5 @@ ingress:
         required: true
         teamName: ol1n
         audTag:
-          - AUD_TAG
+          - 1654b51826c70e9ecefa817edef1d03cafb075724db8b6e9ac8bcf2d3602e074
   - service: http_status:404

@@ -37,6 +37,10 @@ docker na JODA vidí jen `/home` a `/media` — `/pool` mountovat nejde) +
 - `GET /items`, `PATCH /items/{id}` — katalog (název, cena, tagy, limited)
 - `GET /packed/{id}/download` — zip pro Mac
 - `GET /events` — SSE stream; `GET /healthz`
+- `GET /app/` — Flutter web build appky (stejný origin ⇒ žádné CORS a přes
+  ugc.ol1n.com platí jedna Access cookie pro appku i API). Build se sem
+  dostane jako `web/` adresář: `flutter build web --release --base-href /app/`
+  v repu ugc_studio, pak `cp -R build/web ../ugc-backend/web` a redeploy.
 - interní: `POST /worker/claim`, `POST /worker/result/{id}`
 
 Stavy jobu: `new → approved → converting → converted(PASS/WARN/FAIL) → packed`,
@@ -58,9 +62,14 @@ cp ~/.cloudflared/<TUNNEL_ID>.json ~/deploy/ugc-backend/cloudflared/credentials.
 # do cloudflared/config.yml doplnit TUNNEL_ID a AUD_TAG z Access aplikace
 ```
 
-Cloudflare Access (dashboard, jednorázově): app `ugc` pro ugc.ol1n.com,
-policy Service Auth (service tokeny: spark, app) + Allow (owner e-mail);
-AUD tag aplikace patří do `cloudflared/config.yml` (vynucení už na konektoru).
+Cloudflare Access — hotovo 2026-08-22 z CLI (token `AccessApp`, uložený na
+JODA v `~/.cloudflare-access-token`): app `ugc` (AUD už je v
+`cloudflared/config.yml`), policy `app-service-token` (any valid service
+token) + `owner-sso` (e-mail majitele).
+
+⚠ `cloudflared/credentials.json` musí být **0444** — konektor běží jako uid
+65532 a na 0400 dostane „permission denied" a tunel se nezaregistruje
+(projeví se jako error 1033 na hostname).
 
 ## Konverze (blender_scripts/)
 

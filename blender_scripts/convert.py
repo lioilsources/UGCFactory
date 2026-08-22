@@ -58,6 +58,43 @@ def cleanup(obj):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+def remove_floaters(obj, keep_fraction=0.02):
+    """Smaze odpojene komponenty mensi nez keep_fraction celkovych faces.
+    Voxel remesh floatery nespoji a collapse decimate ma topologicke dno
+    ~3 tris na komponentu - tisice strepin drzely front plate na 6k tris
+    pri cili 3600 (zmereno: 205k -> 6500 -> 6116, dal to neslo)."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    seen = set()
+    components = []
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        stack, comp = [f], []
+        seen.add(f.index)
+        while stack:
+            face = stack.pop()
+            comp.append(face)
+            for e in face.edges:
+                for nb in e.link_faces:
+                    if nb.index not in seen:
+                        seen.add(nb.index)
+                        stack.append(nb)
+        components.append(comp)
+    total = len(bm.faces)
+    threshold = max(int(total * keep_fraction), 8)
+    doomed = [f for comp in components if len(comp) < threshold for f in comp]
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context="FACES")
+        bm.to_mesh(obj.data)
+    n_removed = len(doomed)
+    n_comp = len(components)
+    bm.free()
+    return n_comp, n_removed
+
+
 def tri_count(obj):
     obj.data.calc_loop_triangles()
     return len(obj.data.loop_triangles)
@@ -68,7 +105,9 @@ def has_uv(obj):
 
 
 def retopo(obj, backend, max_tris):
-    """SF3D uz je low-poly s UV -> jen pripadny decimate. Jinak voxel remesh
+    """Vraci (tri_count, components, removed_floater_faces).
+
+    SF3D uz je low-poly s UV -> jen pripadny decimate. Jinak voxel remesh
     (zavre diry, sjednoti skorapky - stejna lekce jako blackwell_fix na
     Sparku) a decimate na cil.
 
@@ -86,6 +125,9 @@ def retopo(obj, backend, max_tris):
         mod.voxel_size = voxel
         bpy.ops.object.modifier_apply(modifier=mod.name)
 
+    components, removed = remove_floaters(obj)
+    print(f"components: {components}, floater faces removed: {removed}", flush=True)
+
     mod = obj.modifiers.new("Tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
 
@@ -96,7 +138,19 @@ def retopo(obj, backend, max_tris):
         mod = obj.modifiers.new("Decimate", "DECIMATE")
         mod.ratio = target / tris
         bpy.ops.object.modifier_apply(modifier=mod.name)
-    return tri_count(obj)
+
+    # Eskalace: kdyz je mesh porad nad tvrdym limitem, drzi ho nad nim
+    # zbyle komponenty (decimate ma per-komponentu dno). Zdvojnasobit prah
+    # floateru a zkusit znovu - fragmentovany vstup jinak neprojde nikdy.
+    if tri_count(obj) > max_tris:
+        _, removed2 = remove_floaters(obj, keep_fraction=0.06)
+        removed += removed2
+        tris = tri_count(obj)
+        if tris > target:
+            mod = obj.modifiers.new("Decimate2", "DECIMATE")
+            mod.ratio = target / tris
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+    return tri_count(obj), components, removed
 
 
 def ensure_uv(obj):
@@ -212,7 +266,7 @@ def main():
     reset_scene()
     obj = import_glb(job["glb"])
     cleanup(obj)
-    tris = retopo(obj, job.get("backend", ""), spec["max_tris"])
+    tris, components, floaters_removed = retopo(obj, job.get("backend", ""), spec["max_tris"])
     uv_ok = ensure_uv(obj)
     tex_path = os.path.join(out_dir, "model_tex.png")
     bake_texture(obj, tex_path)
@@ -229,6 +283,8 @@ def main():
         "bbox": [round(d, 4) for d in obj.dimensions],
         "bbox_limit_studs": spec["bbox_studs"],
         "watertight": watertight(obj),
+        "components": components,
+        "floater_faces_removed": floaters_removed,
         "material_count": len(obj.data.materials),
         "attachment": spec["attachment"],
         "fbx": os.path.basename(fbx_path),

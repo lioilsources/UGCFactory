@@ -76,12 +76,40 @@ func main() {
 	mux.HandleFunc("PATCH /items/{id}", s.handlePatchItem)
 	mux.HandleFunc("GET /packed/{id}/download", s.handleDownload)
 	mux.Handle("GET /events", s.broker)
+	// Flutter web build appky na stejnem originu: zadne CORS, a pres
+	// ugc.ol1n.com plati stejna Access cookie pro appku i API.
+	if web := envOr("UGC_WEB", "/web"); dirExists(web) {
+		mux.Handle("GET /app/", spaHandler(web))
+		mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/app/", http.StatusFound)
+		})
+		log.Printf("serving web app from %s at /app/", web)
+	}
 	// worker-only endpointy: v compose siti neverejne, ven je tunnel nepublikuje
 	mux.HandleFunc("POST /worker/claim", s.handleWorkerClaim)
 	mux.HandleFunc("POST /worker/result/{id}", s.handleWorkerResult)
 
 	log.Printf("ugc-api listening on %s, data in %s", addr, dataDir)
 	log.Fatal(http.ListenAndServe(addr, logRequests(mux)))
+}
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// spaHandler serves the Flutter build and falls back to index.html so
+// go_router deep links (/app/triage) survive a page reload.
+func spaHandler(root string) http.Handler {
+	fs := http.FileServer(http.Dir(root))
+	return http.StripPrefix("/app/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := filepath.Clean(r.URL.Path)
+		if _, err := os.Stat(filepath.Join(root, clean)); err != nil {
+			r = r.Clone(r.Context())
+			r.URL.Path = "/"
+		}
+		fs.ServeHTTP(w, r)
+	}))
 }
 
 func envOr(k, def string) string {

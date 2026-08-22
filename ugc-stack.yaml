@@ -22,8 +22,9 @@ services:
       - SPARK_CF_CLIENT_SECRET=${SPARK_CF_CLIENT_SECRET:-}
     volumes:
       - ${DATA_DIR:?set DATA_DIR in .env}:/data
+      - ./web:/web:ro      # flutter build web (appka na /app/)
     ports:
-      - "8095:8095"        # LAN pristup bez tunelu
+      - "8095:8095"        # LAN + tailnet pristup bez tunelu
     networks: [ugc]
 
   ugc-blender:
