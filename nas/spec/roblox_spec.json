@@ -1,0 +1,20 @@
+{
+  "_source": "create.roblox.com/docs/art/accessories/specifications, overeno 2026-08-21",
+  "_notes": "bbox_studs = Normal (Rthro) scale; Accessory Fitting Tool umi attachment vygenerovat sam, jmeno je konvence pro 3D importer. Marketplace strop textury je 2048, bake drzime na 1024 (rychlost CPU bake, mensi soubory).",
+  "texture_max_px": 1024,
+  "material": {"type": "Plastic", "transparency": 0, "vertex_color": [1, 1, 1]},
+  "categories": {
+    "hat":      {"max_tris": 4000, "attachment": "HatAttachment",      "bbox_studs": [1.87, 2.50, 1.87]},
+    "hair":     {"max_tris": 4000, "attachment": "HairAttachment",     "bbox_studs": [1.87, 3.12, 2.18]},
+    "face":     {"max_tris": 4000, "attachment": "FaceFrontAttachment","bbox_studs": [1.87, 1.25, 1.25]},
+    "neck":     {"max_tris": 4000, "attachment": "NeckAttachment",     "bbox_studs": [2.95, 3.68, 2.16]},
+    "shoulder": {"max_tris": 4000, "attachment": "ShoulderAttachment", "bbox_studs": [2.67, 4.40, 3.09]},
+    "front":    {"max_tris": 4000, "attachment": "BodyFrontAttachment","bbox_studs": [2.95, 3.68, 3.24]},
+    "back":     {"max_tris": 4000, "attachment": "BodyBackAttachment", "bbox_studs": [9.86, 8.59, 4.87]},
+    "waist":    {"max_tris": 4000, "attachment": "WaistBackAttachment","bbox_studs": [3.94, 4.29, 7.57]},
+    "sword":    {"max_tris": 4000, "attachment": "RightGripAttachment","bbox_studs": [1.20, 4.20, 1.20],
+                 "_note": "gear/handheld neni Marketplace accessory kategorie - drzime pro budouci use"},
+    "helmet":   {"max_tris": 4000, "attachment": "HatAttachment",      "bbox_studs": [1.87, 2.50, 1.87],
+                 "_note": "alias pro hat"}
+  }
+}
