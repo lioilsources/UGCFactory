@@ -276,6 +276,11 @@ func (s *Server) serveJobFile(w http.ResponseWriter, r *http.Request, name strin
 	if job == nil {
 		return
 	}
+	// CORS na read-only assety: model_viewer_plus na mobilu bezi ve WebView
+	// na originu 127.0.0.1 a GLB si tahne pres fetch() odsud, takze bez teto
+	// hlavicky prohlizec odpoved zahodi a 3D prohlizec zustane prazdny -
+	// bez jakekoli chyby. Na webu je appka same-origin, tam to netreba.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	http.ServeFile(w, r, filepath.Join(s.data, "incoming", job.ID, name))
 }
 

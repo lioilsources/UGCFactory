@@ -67,6 +67,11 @@ make test            # Go testy + flutter test
   65532); jinak error 1033.
 - Token v `cert.pem` umí jen tunely a DNS — na Access apps je potřeba
   API token s `Access: Apps and Policies: Edit`.
+- **3D prohlížeč na mobilu** je WebView na `127.0.0.1` (model_viewer_plus si
+  spouští lokální proxy). Potřebuje proto dvě věci, které selžou tiše a bez
+  chyby: povolený cleartext pro localhost v `network_security_config.xml`
+  a `Access-Control-Allow-Origin` na assetech ugc-api — proxy na model
+  přesměruje, takže jde o cross-origin fetch.
 
 ## Historie
 
