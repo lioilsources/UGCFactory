@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:model_viewer_plus/model_viewer_plus.dart';
+import '../../shared/model_view.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -41,13 +41,11 @@ class ReviewScreen extends ConsumerWidget {
       body: Column(
         children: [
           Expanded(
-            child: ModelViewer(
+            child: ModelView(
               key: ValueKey('mv-${job.id}'),
-              src: api.glbUrl(job.id),
+              viewerUrl: api.viewerUrl(job.id),
+              glbUrl: api.glbUrl(job.id),
               alt: job.prompt,
-              autoRotate: true,
-              cameraControls: true,
-              backgroundColor: const Color(0xFF14161A),
             ),
           ),
           Padding(

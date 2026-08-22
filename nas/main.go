@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -67,6 +68,9 @@ func main() {
 	mux.HandleFunc("GET /jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /jobs/{id}/preview", s.handlePreview)
 	mux.HandleFunc("GET /jobs/{id}/glb", s.handleGLB)
+	mux.HandleFunc("GET /viewer/{id}", s.handleViewer)
+	mux.Handle("GET /viewer/assets/", http.StripPrefix("/viewer/assets/",
+		http.FileServer(http.Dir(envOr("UGC_VIEWER", "/viewer")))))
 	mux.HandleFunc("POST /jobs/{id}/approve", s.handleApprove)
 	mux.HandleFunc("POST /jobs/{id}/reject", s.handleReject)
 	mux.HandleFunc("POST /jobs/{id}/reconvert", s.handleReconvert)
@@ -89,6 +93,9 @@ func main() {
 	// worker-only endpointy: v compose siti neverejne, ven je tunnel nepublikuje
 	mux.HandleFunc("POST /worker/claim", s.handleWorkerClaim)
 	mux.HandleFunc("POST /worker/result/{id}", s.handleWorkerResult)
+
+	// Dogenerovat nahledy pro joby prijate drive, nez preview existovalo.
+	go backfillPreviews(dataDir)
 
 	log.Printf("ugc-api listening on %s, data in %s", addr, dataDir)
 	log.Fatal(http.ListenAndServe(addr, logRequests(mux)))
@@ -196,6 +203,14 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	// preview je volitelny (concept-only joby appka triaguje jen podle nej)
 	_ = saveFormFile(r, "preview", filepath.Join(dir, "preview.png"))
 
+	// Lehky GLB pro prohlizec v appce - plna verze s 2048px texturami se
+	// v model-viewer nevykresli a na mobil je zbytecne velka.
+	go func() {
+		if err := makePreviewGLB(filepath.Join(dir, "model.glb"), filepath.Join(dir, "preview.glb")); err != nil {
+			log.Printf("preview GLB pro %s selhalo: %v", meta.ID, err)
+		}
+	}()
+
 	job := &Job{
 		ID: meta.ID, Status: "new", Prompt: meta.Prompt, Category: meta.Category,
 		Style: meta.Style, Backend: meta.Backend, Seed: meta.Seed,
@@ -291,7 +306,57 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGLB(w http.ResponseWriter, r *http.Request) {
 	// Spravny MIME, jinak si nektere gltf loadery s octet-stream neporadi.
 	w.Header().Set("Content-Type", "model/gltf-binary")
-	s.serveJobFile(w, r, "model.glb")
+	name := "model.glb"
+	// ?full=1 vrati original; jinak lehky nahled, pokud uz existuje
+	if r.URL.Query().Get("full") == "" {
+		if job, err := s.store.GetJob(r.PathValue("id")); err == nil {
+			if _, statErr := os.Stat(filepath.Join(s.data, "incoming", job.ID, "preview.glb")); statErr == nil {
+				name = "preview.glb"
+			}
+		}
+	}
+	s.serveJobFile(w, r, name)
+}
+
+// viewerHTML je cela stranka 3D prohlizece. Servirovana ze stejneho
+// originu jako model i skript, takze odpada localhost proxy, CORS i
+// cleartext vyjimky - presne ty tri veci, ktere na mobilech selhavaly
+// tise a ruzne na kazde platforme.
+const viewerHTML = `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<script type="module" src="/viewer/assets/model-viewer.min.js"></script>
+<style>
+  html,body{margin:0;height:100%%;background:#14161a;overflow:hidden}
+  model-viewer{width:100%%;height:100%%;--poster-color:#14161a}
+  #err{position:absolute;inset:0;display:none;place-items:center;color:#ff8a80;
+       font:14px -apple-system,system-ui,sans-serif;text-align:center;padding:24px}
+</style></head>
+<body>
+<model-viewer src="/jobs/%s/glb" alt="%s" camera-controls auto-rotate
+  touch-action="pan-y" environment-image="neutral" exposure="1.4"
+  shadow-intensity="0.6" camera-orbit="25deg 75deg 105%%" min-field-of-view="20deg"
+  interaction-prompt="none"></model-viewer>
+<div id="err"></div>
+<script>
+  const mv = document.querySelector('model-viewer');
+  mv.addEventListener('error', e => {
+    const d = document.getElementById('err');
+    d.style.display = 'grid';
+    d.textContent = 'Model se nepodarilo nacist: ' + (e.detail && e.detail.type || 'chyba');
+  });
+</script>
+</body></html>`
+
+// handleViewer serves the standalone 3D page for a job.
+func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
+	job := s.jobOr404(w, r.PathValue("id"))
+	if job == nil {
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, viewerHTML, job.ID, html.EscapeString(job.Prompt))
 }
 
 // handleApprove is stage-aware: a new job goes to the converter, a converted
@@ -647,5 +712,36 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 			io.Copy(dst, f)
 		}
 		f.Close()
+	}
+}
+
+// backfillPreviews vyrobi chybejici preview.glb pro uz prijate joby.
+func backfillPreviews(dataDir string) {
+	entries, err := os.ReadDir(filepath.Join(dataDir, "incoming"))
+	if err != nil {
+		return
+	}
+	made := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(dataDir, "incoming", e.Name())
+		full := filepath.Join(dir, "model.glb")
+		prev := filepath.Join(dir, "preview.glb")
+		if _, err := os.Stat(prev); err == nil {
+			continue
+		}
+		if _, err := os.Stat(full); err != nil {
+			continue
+		}
+		if err := makePreviewGLB(full, prev); err != nil {
+			log.Printf("backfill %s: %v", e.Name(), err)
+			continue
+		}
+		made++
+	}
+	if made > 0 {
+		log.Printf("backfill: vyrobeno %d nahledovych GLB", made)
 	}
 }

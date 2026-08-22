@@ -70,10 +70,17 @@
 	<string>UGC Studio mluvi s ugc-api na NAS v lokalni siti (192.168.88.88).</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- ugc-api bezi po LAN bez TLS (http://192.168.88.88:8095) -->
+		<!-- ugc-api bezi po tailnetu/LAN bez TLS.
+		     POZOR: kdyz je pritomny NSAllowsLocalNetworking, iOS 10+
+		     NSAllowsArbitraryLoads IGNORUJE. Pro cleartext ve WKWebView
+		     (3D prohlizec = model_viewer_plus s proxy na 127.0.0.1) je
+		     proto nutny NSAllowsArbitraryLoadsInWebContent - bez nej
+		     zustane prohlizec prazdny bez jakekoli chyby. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
 </dict>

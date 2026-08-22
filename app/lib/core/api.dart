@@ -77,6 +77,13 @@ class UgcApi {
   String glbUrl(String id) =>
       baseUrl.isEmpty ? '/jobs/$id/glb' : '$baseUrl/jobs/$id/glb';
 
+  /// Stranka 3D prohlizece servirovana primo ugc-api. Model i skript jsou
+  /// na stejnem originu jako ona, takze odpadaji vsechny platformni pasti
+  /// lokalni proxy (cleartext localhost na Androidu, ATS ve WKWebView na
+  /// iOS, CORS vsude).
+  String viewerUrl(String id) =>
+      baseUrl.isEmpty ? '/viewer/$id' : '$baseUrl/viewer/$id';
+
   /// SSE stream /events - kazdy event je {"event": "...", "data": {...}}.
   /// Pri vypadku se reconnectuje s backoff; stream nikdy nekonci sam.
   Stream<Map<String, dynamic>> events() async* {

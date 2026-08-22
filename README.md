@@ -67,11 +67,16 @@ make test            # Go testy + flutter test
   65532); jinak error 1033.
 - Token v `cert.pem` umí jen tunely a DNS — na Access apps je potřeba
   API token s `Access: Apps and Policies: Edit`.
-- **3D prohlížeč na mobilu** je WebView na `127.0.0.1` (model_viewer_plus si
-  spouští lokální proxy). Potřebuje proto dvě věci, které selžou tiše a bez
-  chyby: povolený cleartext pro localhost v `network_security_config.xml`
-  a `Access-Control-Allow-Origin` na assetech ugc-api — proxy na model
-  přesměruje, takže jde o cross-origin fetch.
+- **3D prohlížeč servíruje ugc-api** (`/viewer/{id}` + `/viewer/assets/`),
+  ne lokální proxy `model_viewer_plus`. Stránka, model i skript jsou tak na
+  jednom originu a odpadají všechny platformní pasti (cleartext localhost
+  na Androidu, ATS ve WKWebView na iOS, CORS všude) — každá z nich selhávala
+  tiše a jinak.
+- **GLB s 2048² texturami (~12 MB) se v model-viewer nevykreslí** — skončí
+  černou plochou bez chyby. Ověřeno bisekcí v headless Chromu: samotná
+  geometrie i tytéž textury zmenšené se zobrazí. Proto ugc-api vedle plné
+  verze drží `preview.glb` se 512px texturami (~2 MB) a servíruje ho;
+  originál je na `?full=1` a jde do konverze.
 
 ## Historie
 
