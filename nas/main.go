@@ -284,6 +284,8 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGLB(w http.ResponseWriter, r *http.Request) {
+	// Spravny MIME, jinak si nektere gltf loadery s octet-stream neporadi.
+	w.Header().Set("Content-Type", "model/gltf-binary")
 	s.serveJobFile(w, r, "model.glb")
 }
 

@@ -118,6 +118,7 @@ class _JobTile extends ConsumerWidget {
           job.collection,
           if (job.triCount != null) '${job.triCount} tris',
           if (job.error.isNotEmpty) job.error,
+          'klepni pro 3D',
         ].join(' - '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
@@ -125,6 +126,8 @@ class _JobTile extends ConsumerWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const Icon(Icons.view_in_ar, size: 20),
+          const SizedBox(width: 4),
           if (job.verdict.isNotEmpty)
             Chip(
               label: Text(job.verdict),

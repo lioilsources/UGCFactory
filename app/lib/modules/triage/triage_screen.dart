@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -36,9 +37,20 @@ class TriageScreen extends ConsumerWidget {
   }
 }
 
-class _TriageCard extends ConsumerWidget {
+class _TriageCard extends ConsumerStatefulWidget {
   const _TriageCard({required this.job, super.key});
   final Job job;
+
+  @override
+  ConsumerState<_TriageCard> createState() => _TriageCardState();
+}
+
+class _TriageCardState extends ConsumerState<_TriageCard> {
+  // 3D model existuje uz pri triage (Spark ho posila spolu s konceptem),
+  // takze se da rozhodovat podle meshe, ne jen podle obrazku.
+  bool _show3d = false;
+
+  Job get job => widget.job;
 
   void _snack(BuildContext context, String msg) {
     ScaffoldMessenger.of(context)
@@ -63,7 +75,7 @@ class _TriageCard extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final api = ref.watch(apiProvider);
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -98,18 +110,31 @@ class _TriageCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(
-                      child: Image.network(
-                        api.previewUrl(job.id),
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, e, st) => const Center(
-                          child: Icon(Icons.image_not_supported, size: 64),
-                        ),
-                      ),
+                      child: _show3d
+                          ? ModelViewer(
+                              key: ValueKey('triage-3d-${job.id}'),
+                              src: api.glbUrl(job.id),
+                              alt: job.prompt,
+                              autoRotate: true,
+                              cameraControls: true,
+                              backgroundColor: const Color(0xFF14161A),
+                            )
+                          : Image.network(
+                              api.previewUrl(job.id),
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, e, st) => const Center(
+                                child: Icon(Icons.image_not_supported, size: 64),
+                              ),
+                            ),
                     ),
                     ListTile(
                       title: Text(job.prompt, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(
-                          '${job.category} - ${job.style} - ${job.collection} - seed ${job.id.hashCode & 0xffff}'),
+                      subtitle: Text('${job.category} - ${job.style} - ${job.collection}'),
+                      trailing: IconButton.filledTonal(
+                        tooltip: _show3d ? 'Zpet na koncept' : 'Ukaz 3D model',
+                        icon: Icon(_show3d ? Icons.image : Icons.view_in_ar),
+                        onPressed: () => setState(() => _show3d = !_show3d),
+                      ),
                     ),
                   ],
                 ),
