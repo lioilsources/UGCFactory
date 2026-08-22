@@ -2,7 +2,12 @@
 <!-- ugc-api bezi po tailnetu/LAN bez TLS. Cleartext povolujeme adresne
      jen pro nej, ne globalne. Pres ugc.ol1n.com jede HTTPS normalne. -->
 <network-security-config>
+    <!-- model_viewer_plus na mobilu spousti lokalni HTTP proxy na 127.0.0.1
+         a nacita ji ve WebView; bez povoleneho localhostu zustane 3D
+         prohlizec prazdny (Android 9+ zakazuje cleartext ve vychozim stavu). -->
     <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
         <domain includeSubdomains="true">joda.tailde0de8.ts.net</domain>
         <domain includeSubdomains="false">192.168.88.88</domain>
         <domain includeSubdomains="false">100.126.96.36</domain>
