@@ -1,0 +1,148 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/models.dart';
+import '../../core/providers.dart';
+
+/// Zivy prehled fronty: joby seskupene podle stavu, SSE drzi data cerstva.
+class QueueScreen extends ConsumerWidget {
+  const QueueScreen({super.key});
+
+  static const _order = [
+    'new', 'approved', 'converting', 'converted', 'packed',
+    'failed', 'rejected', 'rerolled',
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final jobsAsync = ref.watch(jobsProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Fronta'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.read(jobsProvider.notifier).refresh(),
+          ),
+        ],
+      ),
+      body: jobsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('NAS nedostupny: $e')),
+        data: (jobs) {
+          final byStatus = <String, List<Job>>{};
+          for (final j in jobs) {
+            byStatus.putIfAbsent(j.status, () => []).add(j);
+          }
+          final sections = _order.where(byStatus.containsKey).toList();
+          if (sections.isEmpty) {
+            return const Center(child: Text('Fronta je prazdna.'));
+          }
+          return RefreshIndicator(
+            onRefresh: () => ref.read(jobsProvider.notifier).refresh(),
+            child: ListView(
+              children: [
+                for (final status in sections) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    child: Text(
+                      '${_label(status)} (${byStatus[status]!.length})',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  for (final job in byStatus[status]!) _JobTile(job: job),
+                ],
+                const SizedBox(height: 24),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  static String _label(String s) => switch (s) {
+        'new' => 'Ceka na triage',
+        'approved' => 'Ve fronte na konverzi',
+        'converting' => 'Konvertuje se',
+        'converted' => 'Zkonvertovano - ceka na 3D review',
+        'packed' => 'Zabaleno pro Studio',
+        'failed' => 'Selhalo',
+        'rejected' => 'Zamitnuto',
+        'rerolled' => 'Rerollnuto',
+        _ => s,
+      };
+}
+
+class _JobTile extends ConsumerWidget {
+  const _JobTile({required this.job});
+  final Job job;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final api = ref.watch(apiProvider);
+    final verdictColor = switch (job.verdict) {
+      'PASS' => Colors.green,
+      'WARN' => Colors.amber,
+      'FAIL' => Colors.red,
+      _ => null,
+    };
+    return ListTile(
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.network(
+          api.previewUrl(job.id),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          errorBuilder: (_, e, st) =>
+              const SizedBox(width: 48, child: Icon(Icons.category)),
+        ),
+      ),
+      title: Text(job.prompt, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          job.category,
+          job.collection,
+          if (job.triCount != null) '${job.triCount} tris',
+          if (job.error.isNotEmpty) job.error,
+        ].join(' - '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (job.verdict.isNotEmpty)
+            Chip(
+              label: Text(job.verdict),
+              backgroundColor: verdictColor?.withValues(alpha: 0.15),
+              labelStyle: TextStyle(color: verdictColor),
+              visualDensity: VisualDensity.compact,
+            ),
+          if (job.status == 'converted' || job.status == 'failed')
+            IconButton(
+              tooltip: job.status == 'converted' ? 'Zabalit' : 'Zkusit znovu',
+              icon: Icon(job.status == 'converted'
+                  ? Icons.inventory_2
+                  : Icons.replay),
+              onPressed: () async {
+                final action = job.status == 'converted'
+                    ? api.approve(job.id)
+                    : api.reconvert(job.id);
+                try {
+                  await action;
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text('$e')));
+                  }
+                }
+                ref.read(jobsProvider.notifier).refresh();
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
