@@ -56,6 +56,22 @@ na `app/.cf-token` a vyplň. Makefile ho zabuduje přes `--dart-define`, takže
 **token nikdy není ve zdrojácích** (soubor je v .gitignore); jde ho i přepsat
 přímo v Nastavení appky.
 
+## Vyzkoušet item na vlastním avataru
+
+```bash
+./tools/ugc-pull.sh          # stáhne vše ve stavu packed do ~/UGC/inbox/
+```
+
+Ve Studiu pak **Avatar → Accessory Fitting Tool → Load Mesh/Model** →
+vyber `.fbx`, přiřaď texturu (`*_tex.png`), vyber typ doplňku a nasaď na
+testovacího avatara. Tohle je zdarma a okamžité.
+
+Nosit item na **veřejném profilu** už vyžaduje publikaci na Marketplace:
+ověření účtu vládním dokladem, poplatek **80 Robux** za nahrání a moderaci.
+Náramenníky mají navíc zálohu 1 000 Robux při zalistování (ověřeno
+2026-08-22). Ve vlastní hře jde item nasadit i bez toho —
+`Humanoid:AddAccessory()` nad nahraným meshem.
+
 ## Provozní znalosti (draze zaplacené)
 
 - **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí
