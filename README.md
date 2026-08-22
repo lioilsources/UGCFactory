@@ -60,7 +60,9 @@ make test            # Go testy + flutter test
 - **Decimate počítá faces, Roblox trojúhelníky** — triangulovat před decimací.
   Fragmentovaný mesh (ořezaný koncept) se pod limit nedostane vůbec.
 - **Docker na JODA je snap** — mountovat jde jen `/home` a `/media`;
-  `/pool` i `/tmp` se tiše vyprázdní.
+  `/pool` i `/tmp` se tiše vyprázdní. Data proto žijí na `/media/storage/ugc`.
+- **SQLite drží data ve WAL** — při stěhování kopírovat `ugc.db` **i**
+  `-wal`/`-shm`; samotný `.db` má 4 KB a byl by prázdný.
 - `cloudflared/credentials.json` musí být **0444** (konektor běží jako uid
   65532); jinak error 1033.
 - Token v `cert.pem` umí jen tunely a DNS — na Access apps je potřeba
