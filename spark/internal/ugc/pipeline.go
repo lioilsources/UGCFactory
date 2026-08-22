@@ -142,11 +142,14 @@ func (p *Pipeline) run(id string) {
 
 	// 1. koncept
 	p.setStage(id, "concept", "")
-	checkpoint := job.Req.Checkpoint
-	if checkpoint == "" {
-		checkpoint = p.cfg.Checkpoint
+	checkpoint, product := PickModel(job.Req.Category, job.Req.Checkpoint)
+	var pos, neg string
+	if product {
+		pos, neg = productPrompt(job.Req.Prompt, job.Req.Style)
+	} else {
+		pos, neg = PromptFor(job.Req.Category, job.Req.Style, job.Req.Prompt)
 	}
-	pos, neg := PromptFor(job.Req.Category, job.Req.Style, job.Req.Prompt)
+	log.Info("concept", "model", checkpoint, "product_mode", product)
 	prefix := "ugc/" + id
 	outs, err := p.cfg.Comfy.Run(ctx, conceptGraph(checkpoint, pos, neg, job.Req.Seed, prefix+"-concept"), p.cfg.Timeout)
 	if err != nil {

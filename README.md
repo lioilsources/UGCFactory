@@ -72,6 +72,21 @@ Náramenníky mají navíc zálohu 1 000 Robux při zalistování (ověřeno
 2026-08-22). Ve vlastní hře jde item nasadit i bez toho —
 `Humanoid:AddAccessory()` nad nahraným meshem.
 
+## Dva modely, podle toho co se generuje
+
+| Co | Model | Prompt |
+|---|---|---|
+| předměty (zbraně, helmy, křídla, korunky) | Illustrious | danbooru tagy |
+| co se nosí na těle (vlasy, oblečení, šperk na krku) | Juggernaut XL | produktová fotka |
+
+Vybírá se automaticky podle kategorie (`PickModel` v `spark/internal/ugc`),
+`checkpoint` v requestu to přebije. Důvod je v trénovacích datech: danbooru
+modely znají předmět jako věc, ale oblečení a vlasy jen na postavě — na
+prompt „dračí šaty" nakreslí draka. Fotorealistické modely mají v datech
+e-shopové fotky, takže „šaty na neviditelné figuríně" jim jde přirozeně
+(srovnávací test 2026-08-22: Illustrious drak, Juggernaut i FLUX správně
+šaty; FLUX je 3× pomalejší, proto výchozí Juggernaut).
+
 ## Provozní znalosti (draze zaplacené)
 
 - **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí

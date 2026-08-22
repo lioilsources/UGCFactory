@@ -5,6 +5,53 @@ import (
 	"strings"
 )
 
+// Vyber modelu podle toho, co se generuje.
+//
+// Danbooru modely (Illustrious) znaji predmety - zbrane, helmy, kridla -
+// a kresli je cistě a rychle. Neznaji ale nic, co v jejich trenovacich
+// datech existuje jen na postave: obleceni, vlasy, sperk na krku. Tam
+// nakresli bud postavu, nebo detail latky (overeno kolekci Dragon Couture).
+//
+// Fotorealisticke modely maji v datech produktove fotky z e-shopu, takze
+// "saty na neviditelne figurine na bilem pozadi" jim jde prirozene
+// (srovnavaci test 2026-08-22: Illustrious nakreslil draka, Juggernaut
+// i FLUX spravne saty).
+const (
+	modelAnime = "Illustrious-XL-v2.0.safetensors"
+	modelPhoto = "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
+)
+
+// wearOnBody jsou kategorie, ktere danbooru modely neumi samostatne.
+var wearOnBody = map[string]bool{
+	"hair": true, "neck": true, "front": true, "waist": true,
+}
+
+// PickModel vybere checkpoint a rezim promptu. Explicitni checkpoint
+// z requestu ma prednost.
+func PickModel(category, requested string) (checkpoint string, product bool) {
+	if requested != "" {
+		return requested, strings.Contains(strings.ToLower(requested), "juggernaut") ||
+			strings.Contains(strings.ToLower(requested), "photo")
+	}
+	if wearOnBody[category] {
+		return modelPhoto, true
+	}
+	return modelAnime, false
+}
+
+// productPrompt je ramec produktove fotky: cely predmet, zadna postava.
+func productPrompt(prompt, style string) (string, string) {
+	pos := fmt.Sprintf(
+		"product photography of %s, %s, displayed on an invisible mannequin, "+
+			"isolated on plain white background, studio lighting, "+
+			"entire item visible, catalog photo",
+		prompt, style)
+	neg := "person, human, model, body, legs, arms, face, skin, hands, " +
+		"close-up, cropped, partial, text, watermark, signature, logo, " +
+		"blurry, child, nsfw, " + artNegatives
+	return pos, neg
+}
+
 // Concept graph: checkpoint -> prompt -> KSampler -> PNG. Illustrious-style
 // defaults; the prompt template frames the item as a single centred game
 // asset so the mesh stage gets clean geometry.
@@ -14,10 +61,12 @@ func conceptGraph(checkpoint, prompt, negative string, seed int64, filenamePrefi
 		"2": node("CLIPTextEncode", in{"clip": ref("1", 1), "text": prompt}),
 		"3": node("CLIPTextEncode", in{"clip": ref("1", 1), "text": negative}),
 		"4": node("EmptyLatentImage", in{"width": 1024, "height": 1024, "batch_size": 1}),
+		// dpmpp_2m/karras je pro fotorealisticke modely vhodnejsi nez
+		// euler_ancestral, ktery se hodi na anime styl
 		"5": node("KSampler", in{
 			"model": ref("1", 0), "positive": ref("2", 0), "negative": ref("3", 0),
-			"latent_image": ref("4", 0), "seed": seed, "steps": 28, "cfg": 6.0,
-			"sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": 1.0}),
+			"latent_image": ref("4", 0), "seed": seed, "steps": 30, "cfg": 6.0,
+			"sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0}),
 		"6": node("VAEDecode", in{"samples": ref("5", 0), "vae": ref("1", 2)}),
 		"7": node("SaveImage", in{"images": ref("6", 0), "filename_prefix": filenamePrefix}),
 	}
