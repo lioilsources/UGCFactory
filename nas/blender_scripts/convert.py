@@ -58,11 +58,14 @@ def cleanup(obj):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def remove_floaters(obj, keep_fraction=0.02):
-    """Smaze odpojene komponenty mensi nez keep_fraction celkovych faces.
-    Voxel remesh floatery nespoji a collapse decimate ma topologicke dno
-    ~3 tris na komponentu - tisice strepin drzely front plate na 6k tris
-    pri cili 3600 (zmereno: 205k -> 6500 -> 6116, dal to neslo)."""
+def remove_floaters(obj, keep_fraction=0.02, max_components=None):
+    """Smaze odpojene komponenty mensi nez keep_fraction celkovych faces;
+    s max_components navic nechá jen N nejvetsich.
+
+    Collapse decimate ma topologicke dno ~3 tris na komponentu, takze mesh
+    roztristeny na stovky kusu se pod limit nedostane bez ohledu na ratio
+    (zmereno: helma 762 komponent -> 5184 tris pri cili 3600, plat 718 ->
+    4248). Roblox accessory stejne chce jednu skorapku, ne konfety."""
     import bmesh
     bm = bmesh.new()
     bm.from_mesh(obj.data)
@@ -85,7 +88,12 @@ def remove_floaters(obj, keep_fraction=0.02):
         components.append(comp)
     total = len(bm.faces)
     threshold = max(int(total * keep_fraction), 8)
-    doomed = [f for comp in components if len(comp) < threshold for f in comp]
+    keep = [c for c in components if len(c) >= threshold]
+    if max_components is not None and len(keep) > max_components:
+        keep.sort(key=len, reverse=True)
+        keep = keep[:max_components]
+    keep_ids = {id(c) for c in keep}
+    doomed = [f for comp in components if id(comp) not in keep_ids for f in comp]
     if doomed:
         bmesh.ops.delete(bm, geom=doomed, context="FACES")
         bm.to_mesh(obj.data)
@@ -139,17 +147,30 @@ def retopo(obj, backend, max_tris):
         mod.ratio = target / tris
         bpy.ops.object.modifier_apply(modifier=mod.name)
 
-    # Eskalace: kdyz je mesh porad nad tvrdym limitem, drzi ho nad nim
-    # zbyle komponenty (decimate ma per-komponentu dno). Zdvojnasobit prah
-    # floateru a zkusit znovu - fragmentovany vstup jinak neprojde nikdy.
-    if tri_count(obj) > max_tris:
-        _, removed2 = remove_floaters(obj, keep_fraction=0.06)
-        removed += removed2
+    # Eskalace: collapse decimate ma dno - u roztristeneho meshe se zastavi
+    # (zmereno: 5188 -> 5184 a dal ne, protoze 762 komponent nejde slucovat).
+    # Voxel remesh postavi topologii znovu jako jednu skorapku, takze hrubsi
+    # voxel poly count spolehlive srazi. Radeji hrubsi helma nez FAIL.
+    for attempt in range(1, 4):
+        if tri_count(obj) <= max_tris:
+            break
+        dims = obj.dimensions
+        voxel = max(max(dims) * VOXEL_ADAPTIVE_FRACTION * (2 ** attempt), 0.001)
+        mod = obj.modifiers.new("Remesh%d" % attempt, "REMESH")
+        mod.mode = "VOXEL"
+        mod.voxel_size = voxel
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+
+        mod = obj.modifiers.new("Tri%d" % attempt, "TRIANGULATE")
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+
         tris = tri_count(obj)
         if tris > target:
-            mod = obj.modifiers.new("Decimate2", "DECIMATE")
+            mod = obj.modifiers.new("Dec%d" % attempt, "DECIMATE")
             mod.ratio = target / tris
             bpy.ops.object.modifier_apply(modifier=mod.name)
+        print("remesh escalation %d: voxel=%.5f -> %d tris" % (attempt, voxel, tri_count(obj)), flush=True)
+
     return tri_count(obj), components, removed
 
 
