@@ -116,6 +116,7 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
                               viewerUrl: api.viewerUrl(job.id),
                               glbUrl: api.glbUrl(job.id),
                               alt: job.prompt,
+                              headers: api.authHeaders,
                             )
                           : Image.network(
                               api.previewUrl(job.id),

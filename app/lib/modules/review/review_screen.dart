@@ -46,6 +46,7 @@ class ReviewScreen extends ConsumerWidget {
               viewerUrl: api.viewerUrl(job.id),
               glbUrl: api.glbUrl(job.id),
               alt: job.prompt,
+              headers: api.authHeaders,
             ),
           ),
           Padding(

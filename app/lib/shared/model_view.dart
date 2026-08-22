@@ -16,11 +16,17 @@ class ModelView extends StatefulWidget {
     required this.viewerUrl,
     required this.glbUrl,
     this.alt = '',
+    this.headers = const {},
   });
 
   final String viewerUrl;
   final String glbUrl;
   final String alt;
+
+  /// Cloudflare Access hlavicky. Staci je poslat s prvni strankou - CF
+  /// odpovi cookie CF_Authorization, kterou WebView pouzije i pro model
+  /// a skript (subresources uz vlastni hlavicky neprenesou).
+  final Map<String, String> headers;
 
   @override
   State<ModelView> createState() => _ModelViewState();
@@ -42,7 +48,7 @@ class _ModelViewState extends State<ModelView> {
           onProgress: (p) => setState(() => _progress = p),
           onWebResourceError: (e) => setState(() => _error = e.description),
         ))
-        ..loadRequest(Uri.parse(widget.viewerUrl));
+        ..loadRequest(Uri.parse(widget.viewerUrl), headers: widget.headers);
     }
   }
 

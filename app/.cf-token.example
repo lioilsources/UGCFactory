@@ -1,0 +1,5 @@
+# Cloudflare Access service token pro pristup pres ugc.ol1n.com.
+# Zkopiruj na app/.cf-token (gitignored) - Makefile ho zabuduje do buildu
+# pres --dart-define, takze token neni ve zdrojacich na verejnem GitHubu.
+CF_CLIENT_ID=xxxxxxxx.access
+CF_CLIENT_SECRET=xxxxxxxx

@@ -48,7 +48,13 @@ make test            # Go testy + flutter test
 |---|---|---|
 | mobil / prohlížeč | `http://joda.tailde0de8.ts.net:8095/app/` | zapnutý Tailscale |
 | odkudkoli | `https://ugc.ol1n.com/app/` | přihlášení přes Cloudflare Access |
-| nativní Android | `make app-android` | připojený telefon |
+| nativní Android / iOS | `make app-android` / `make app-ios` | připojený telefon |
+
+Nativní appka umí obojí — v Nastavení se přepíná mezi Tailscale a internetem.
+Pro internet potřebuje Access service token: zkopíruj `app/.cf-token.example`
+na `app/.cf-token` a vyplň. Makefile ho zabuduje přes `--dart-define`, takže
+**token nikdy není ve zdrojácích** (soubor je v .gitignore); jde ho i přepsat
+přímo v Nastavení appky.
 
 ## Provozní znalosti (draze zaplacené)
 

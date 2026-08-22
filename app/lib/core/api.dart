@@ -8,10 +8,25 @@ import 'models.dart';
 /// Klient ugc-api (NAS). Jedno API, jedna auth - appka nikdy nemluvi
 /// primo se Sparkem (UGC_STUDIO_APP_PLAN).
 class UgcApi {
-  UgcApi(this.baseUrl);
+  UgcApi(this.baseUrl, {this.clientId = '', this.clientSecret = ''});
 
   final String baseUrl;
+
+  /// Cloudflare Access service token. Prazdny na tailnetu/LAN, vyplneny
+  /// kdyz appka jde pres ugc.ol1n.com. CF na prvni request s temito
+  /// hlavickami vrati cookie CF_Authorization (24 h), takze WebView pak
+  /// projde i na model a skript.
+  final String clientId;
+  final String clientSecret;
+
   final http.Client _client = http.Client();
+
+  Map<String, String> get authHeaders => clientId.isEmpty
+      ? const {}
+      : {
+          'CF-Access-Client-Id': clientId,
+          'CF-Access-Client-Secret': clientSecret,
+        };
 
   Uri _u(String path, [Map<String, String>? q]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: q);
@@ -20,7 +35,7 @@ class UgcApi {
     final resp = await _client.get(_u('/jobs', {
       if (status != null) 'status': status,
       'limit': '$limit',
-    }));
+    }), headers: authHeaders);
     _check(resp);
     final list = jsonDecode(resp.body) as List<dynamic>;
     return list
@@ -29,7 +44,7 @@ class UgcApi {
   }
 
   Future<List<Item>> items() async {
-    final resp = await _client.get(_u('/items'));
+    final resp = await _client.get(_u('/items'), headers: authHeaders);
     _check(resp);
     final list = jsonDecode(resp.body) as List<dynamic>;
     return list
@@ -43,7 +58,7 @@ class UgcApi {
   Future<Job> reconvert(String id) => _post('/jobs/$id/reconvert');
 
   Future<Job> _post(String path) async {
-    final resp = await _client.post(_u(path));
+    final resp = await _client.post(_u(path), headers: authHeaders);
     _check(resp);
     return Job.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
@@ -58,7 +73,7 @@ class UgcApi {
   }) async {
     final resp = await _client.post(
       _u('/generate'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', ...authHeaders},
       body: jsonEncode({
         'prompt': prompt,
         'category': category,
@@ -91,7 +106,8 @@ class UgcApi {
     while (true) {
       try {
         final req = http.Request('GET', _u('/events'))
-          ..headers['Accept'] = 'text/event-stream';
+          ..headers['Accept'] = 'text/event-stream'
+          ..headers.addAll(authHeaders);
         final resp = await _client.send(req);
         backoff = const Duration(seconds: 1);
         final lines = resp.stream

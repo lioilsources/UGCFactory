@@ -12,6 +12,12 @@ NAS_DIR   ?= ~/deploy/UGCFactory/nas
 SPARK_DIR ?= ~/deploy/UGCFactory/spark
 RSYNC := rsync -a --exclude .git --exclude __pycache__ --exclude build
 
+# Access service token pro ugc.ol1n.com. Zije v app/.cf-token (gitignored)
+# a zabuduje se do appky pres --dart-define, aby nebyl ve verejnem repu.
+CF_TOKEN_FILE := app/.cf-token
+DART_DEFINES := $(shell test -f $(CF_TOKEN_FILE) && \
+	sed -n 's/^\([A-Z_]*\)=\(.*\)$$/--dart-define=\1=\2/p' $(CF_TOKEN_FILE) | tr '\n' ' ')
+
 .PHONY: deploy-nas deploy-spark app-web app-android status test
 
 # credentials.json je mimo git (tunnel secret) - deploy ho nesmi prepsat
@@ -44,18 +50,18 @@ deploy-spark:
 	ssh $(SPARK) 'cd $(SPARK_DIR) && docker compose -f ugc-spark.yaml up -d --build'
 
 app-web:
-	cd app && flutter build web --release --base-href /app/
+	cd app && flutter build web --release --base-href /app/ $(DART_DEFINES)
 	rm -rf nas/web && cp -R app/build/web nas/web
 	$(MAKE) deploy-nas
 
 app-android:
-	cd app && flutter build apk --release && flutter install --release
+	cd app && flutter build apk --release $(DART_DEFINES) && flutter install --release
 
 # iOS jde nasadit i bezdratove (zarizeni sparovane pres Xcode). Podepisuje
 # se automaticky tymem P82HWPG7FN z Runner.xcodeproj.
 IPHONE ?= 00008101-001175D90AA0001E
 app-ios:
-	cd app && flutter build ios --release && flutter install -d $(IPHONE) --release
+	cd app && flutter build ios --release $(DART_DEFINES) && flutter install -d $(IPHONE) --release
 
 status:
 	@echo "== NAS ugc-api ==";     ssh $(NAS) 'curl -s localhost:8095/healthz' || true; echo

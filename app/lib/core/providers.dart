@@ -18,6 +18,12 @@ const defaultBaseUrl = 'http://joda.tailde0de8.ts.net:8095';
 /// druhou auth (Access cookie plati pro cely origin).
 String get initialBaseUrl => kIsWeb ? '' : defaultBaseUrl;
 
+/// Cloudflare Access service token pro pristup pres ugc.ol1n.com bez
+/// Tailscale. Predava se pri buildu (--dart-define), aby nebyl ve zdrojacich
+/// na verejnem GitHubu; v Nastaveni jde prepsat.
+const _buildClientId = String.fromEnvironment('CF_CLIENT_ID');
+const _buildClientSecret = String.fromEnvironment('CF_CLIENT_SECRET');
+
 final prefsProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('overridden in main'),
 );
@@ -26,8 +32,18 @@ final baseUrlProvider = StateProvider<String>((ref) {
   return ref.watch(prefsProvider).getString('baseUrl') ?? initialBaseUrl;
 });
 
+final cfClientIdProvider = StateProvider<String>((ref) =>
+    ref.watch(prefsProvider).getString('cfClientId') ?? _buildClientId);
+
+final cfClientSecretProvider = StateProvider<String>((ref) =>
+    ref.watch(prefsProvider).getString('cfClientSecret') ?? _buildClientSecret);
+
 final apiProvider = Provider<UgcApi>((ref) {
-  return UgcApi(ref.watch(baseUrlProvider));
+  return UgcApi(
+    ref.watch(baseUrlProvider),
+    clientId: ref.watch(cfClientIdProvider),
+    clientSecret: ref.watch(cfClientSecretProvider),
+  );
 });
 
 /// Zivy seznam jobu. SSE je hlavni signal, ale NESMI byt jediny: kdyz
