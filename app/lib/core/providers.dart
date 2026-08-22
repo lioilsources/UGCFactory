@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,9 +30,11 @@ final apiProvider = Provider<UgcApi>((ref) {
   return UgcApi(ref.watch(baseUrlProvider));
 });
 
-/// Zivy seznam jobu: fetch pri startu + refetch po kazdem SSE eventu.
-/// SSE nese cele joby, ale refetch drzi jednu cestu pravdy (levny, radove
-/// stovky radku).
+/// Zivy seznam jobu. SSE je hlavni signal, ale NESMI byt jediny: kdyz
+/// spojeni spadne (restart ugc-api, uspani telefonu, prepnuti site),
+/// appka by jinak navzdy ukazovala stara data - presne tak zustaly ve
+/// fronte viset FAILy, ktere uz na serveru davno nebyly.
+/// Proto jeste periodicky refresh a refresh pri navratu appky do popredi.
 final jobsProvider =
     AsyncNotifierProvider<JobsNotifier, List<Job>>(JobsNotifier.new);
 
@@ -37,8 +42,16 @@ class JobsNotifier extends AsyncNotifier<List<Job>> {
   @override
   Future<List<Job>> build() async {
     final api = ref.watch(apiProvider);
+
     final sub = api.events().listen((_) => refresh());
     ref.onDispose(sub.cancel);
+
+    final timer = Timer.periodic(const Duration(seconds: 30), (_) => refresh());
+    ref.onDispose(timer.cancel);
+
+    final lifecycle = AppLifecycleListener(onResume: refresh);
+    ref.onDispose(lifecycle.dispose);
+
     return api.jobs();
   }
 
