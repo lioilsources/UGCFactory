@@ -82,65 +82,46 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
       child: Column(
         children: [
           Expanded(
-            child: Dismissible(
-              key: ValueKey('dismiss-${job.id}'),
-              direction: DismissDirection.horizontal,
-              onDismissed: (dir) {
-                if (dir == DismissDirection.startToEnd) {
-                  _act(context, ref, () => api.approve(job.id), 'Schvaleno -> konverze');
-                } else {
-                  _act(context, ref, () => api.reject(job.id), 'Zamitnuto');
-                }
-              },
-              background: const _SwipeHint(
-                alignment: Alignment.centerLeft,
-                icon: Icons.check_circle,
-                color: Colors.green,
-                label: 'APPROVE',
-              ),
-              secondaryBackground: const _SwipeHint(
-                alignment: Alignment.centerRight,
-                icon: Icons.cancel,
-                color: Colors.red,
-                label: 'REJECT',
-              ),
-              child: Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _show3d
-                          ? ModelView(
-                              key: ValueKey('triage-3d-${job.id}'),
-                              viewerUrl: api.viewerUrl(job.id),
-                              glbUrl: api.glbUrl(job.id),
-                              alt: job.prompt,
-                              headers: api.authHeaders,
-                            )
-                          : Image.network(
-                              api.previewUrl(job.id),
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, e, st) => const Center(
-                                child: Icon(Icons.image_not_supported, size: 64),
-                              ),
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _show3d
+                        ? ModelView(
+                            key: ValueKey('triage-3d-${job.id}'),
+                            viewerUrl: api.viewerUrl(job.id),
+                            glbUrl: api.glbUrl(job.id),
+                            alt: job.prompt,
+                            headers: api.authHeaders,
+                          )
+                        : Image.network(
+                            api.previewUrl(job.id),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, e, st) => const Center(
+                              child: Icon(Icons.image_not_supported, size: 64),
                             ),
+                          ),
+                  ),
+                  ListTile(
+                    title: Text(job.prompt,
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                        '${job.category} - ${job.style} - ${job.collection}'),
+                    trailing: IconButton.filledTonal(
+                      tooltip: _show3d ? 'Zpet na koncept' : 'Ukaz 3D model',
+                      icon: Icon(_show3d ? Icons.image : Icons.view_in_ar),
+                      onPressed: () => setState(() => _show3d = !_show3d),
                     ),
-                    ListTile(
-                      title: Text(job.prompt, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('${job.category} - ${job.style} - ${job.collection}'),
-                      trailing: IconButton.filledTonal(
-                        tooltip: _show3d ? 'Zpet na koncept' : 'Ukaz 3D model',
-                        icon: Icon(_show3d ? Icons.image : Icons.view_in_ar),
-                        onPressed: () => setState(() => _show3d = !_show3d),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
           const SizedBox(height: 12),
+          // Swipe tu byl driv, ale koliduje s otacenim 3D modelu - orbit
+          // gesto a "dismiss" jsou totez tazeni. Rozhoduje se tlacitky.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -161,34 +142,6 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SwipeHint extends StatelessWidget {
-  const _SwipeHint({
-    required this.alignment,
-    required this.icon,
-    required this.color,
-    required this.label,
-  });
-  final Alignment alignment;
-  final IconData icon;
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 48),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
         ],
       ),
     );
