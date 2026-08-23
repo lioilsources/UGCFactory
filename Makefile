@@ -54,8 +54,11 @@ app-web:
 	rm -rf nas/web && cp -R app/build/web nas/web
 	$(MAKE) deploy-nas
 
+# Bez -d si flutter vybere prvni zarizeni v seznamu, coz byval macOS -
+# a nainstaloval desktopovou verzi misto telefonu.
+PIXEL ?= 46201JEKB03641
 app-android:
-	cd app && flutter build apk --release $(DART_DEFINES) && flutter install --release
+	cd app && flutter build apk --release $(DART_DEFINES) && flutter install -d $(PIXEL) --release
 
 # iOS jde nasadit i bezdratove (zarizeni sparovane pres Xcode). Podepisuje
 # se automaticky tymem P82HWPG7FN z Runner.xcodeproj.
