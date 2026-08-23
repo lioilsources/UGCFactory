@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +19,10 @@ import (
 type Config struct {
 	Comfy      *Comfy
 	NAS        *NAS
+	SF3D       *SF3D
 	Checkpoint string        // default checkpoint pro koncepty
 	Timeout    time.Duration // na jednu ComfyUI stage
+	QueueDir   string        // perzistence fronty (prezije restart)
 }
 
 type Request struct {
@@ -49,10 +53,67 @@ type Pipeline struct {
 }
 
 func New(cfg Config) *Pipeline {
-	p := &Pipeline{cfg: cfg, jobs: map[string]*Job{}, work: make(chan string, 256)}
+	p := &Pipeline{cfg: cfg, jobs: map[string]*Job{}, work: make(chan string, 4096)}
+	p.restore()
 	go p.worker()
 	go p.cfg.NAS.RetrySpool()
 	return p
+}
+
+// persist ulozi nedokonceny job na disk. Bez toho restart kontejneru
+// (tedy kazdy deploy) zahodi celou frontu - stalo se to a preslo to
+// nekolik hodin prace.
+func (p *Pipeline) persist(job *Job) {
+	if p.cfg.QueueDir == "" {
+		return
+	}
+	os.MkdirAll(p.cfg.QueueDir, 0o755)
+	b, err := json.Marshal(job)
+	if err != nil {
+		return
+	}
+	os.WriteFile(filepath.Join(p.cfg.QueueDir, job.ID+".json"), b, 0o644)
+}
+
+func (p *Pipeline) forget(id string) {
+	if p.cfg.QueueDir != "" {
+		os.Remove(filepath.Join(p.cfg.QueueDir, id+".json"))
+	}
+}
+
+// restore vrati do fronty joby, ktere pri predchozim behu nedobehly.
+func (p *Pipeline) restore() {
+	if p.cfg.QueueDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(p.cfg.QueueDir)
+	if err != nil {
+		return
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(p.cfg.QueueDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var job Job
+		if json.Unmarshal(b, &job) != nil || job.ID == "" {
+			continue
+		}
+		job.Stage = "queued"
+		p.jobs[job.ID] = &job
+		select {
+		case p.work <- job.ID:
+			n++
+		default:
+		}
+	}
+	if n > 0 {
+		slog.Info("fronta obnovena po restartu", "jobu", n)
+	}
 }
 
 func (p *Pipeline) Submit(req Request) (*Job, error) {
@@ -63,10 +124,12 @@ func (p *Pipeline) Submit(req Request) (*Job, error) {
 		return nil, fmt.Errorf("missing category")
 	}
 	if req.Backend == "" {
-		req.Backend = "trellis"
+		// SF3D je vychozi: ~1,5 s misto ~4 min, low-poly s UV a normalami.
+		// Na finalni kusy se pak da job pregenerovat TRELLISem (vic detailu).
+		req.Backend = "sf3d"
 	}
-	if req.Backend != "trellis" {
-		return nil, fmt.Errorf("backend %q not available yet", req.Backend)
+	if req.Backend != "trellis" && req.Backend != "sf3d" {
+		return nil, fmt.Errorf("neznamy backend %q (trellis|sf3d)", req.Backend)
 	}
 	if req.Seed == 0 {
 		req.Seed = time.Now().UnixNano() % 2147483647
@@ -81,6 +144,7 @@ func (p *Pipeline) Submit(req Request) (*Job, error) {
 	p.mu.Lock()
 	p.jobs[job.ID] = job
 	p.mu.Unlock()
+	p.persist(job)
 	select {
 	case p.work <- job.ID:
 	default:
@@ -138,6 +202,7 @@ func (p *Pipeline) run(id string) {
 	fail := func(stage string, err error) {
 		log.Error("ugc stage failed", "stage", stage, "err", err)
 		p.setStage(id, "failed", fmt.Sprintf("%s: %v", stage, err))
+		p.forget(id)
 	}
 
 	// 1. koncept
@@ -186,22 +251,31 @@ func (p *Pipeline) run(id string) {
 		return
 	}
 
-	// 3. mesh (TRELLIS)
+	// 3. mesh - SF3D (rychla draha) nebo TRELLIS (vic detailu)
 	p.setStage(id, "mesh", "")
-	meshInput := id + "-clean.png"
-	if err := p.cfg.Comfy.UploadImage(ctx, meshInput, cleanPNG); err != nil {
-		fail("mesh-upload", err)
-		return
-	}
-	outs, err = p.cfg.Comfy.Run(ctx, trellisGraph(meshInput, job.Req.Seed, "3D/"+id), p.cfg.Timeout)
-	if err != nil {
-		fail("mesh", err)
-		return
-	}
-	glb, err := p.meshFile(ctx, outs, id)
-	if err != nil {
-		fail("mesh-fetch", err)
-		return
+	var glb []byte
+	if job.Req.Backend == "sf3d" {
+		glb, err = p.cfg.SF3D.Mesh(ctx, cleanPNG)
+		if err != nil {
+			fail("mesh-sf3d", err)
+			return
+		}
+	} else {
+		meshInput := id + "-clean.png"
+		if err := p.cfg.Comfy.UploadImage(ctx, meshInput, cleanPNG); err != nil {
+			fail("mesh-upload", err)
+			return
+		}
+		outs, err = p.cfg.Comfy.Run(ctx, trellisGraph(meshInput, job.Req.Seed, "3D/"+id), p.cfg.Timeout)
+		if err != nil {
+			fail("mesh", err)
+			return
+		}
+		glb, err = p.meshFile(ctx, outs, id)
+		if err != nil {
+			fail("mesh-fetch", err)
+			return
+		}
 	}
 
 	// 4. push na NAS (pri nedostupnosti spool + retry)
@@ -219,6 +293,7 @@ func (p *Pipeline) run(id string) {
 	} else {
 		p.setStage(id, "done", "")
 	}
+	p.forget(id)
 	log.Info("ugc job done", "took", time.Since(started).Round(time.Second))
 }
 

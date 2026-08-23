@@ -39,7 +39,9 @@ func main() {
 	pipe := ugc.New(ugc.Config{
 		Comfy:      ugc.NewComfy(envOr("UGC_COMFY_URL", "http://host.docker.internal:8188")),
 		NAS:        ugc.NewNAS(envOr("UGC_NAS_URL", "http://192.168.88.88:8095"), envOr("UGC_SPOOL", "/spool")),
+		SF3D:       ugc.NewSF3D(envOr("UGC_SF3D_URL", "http://host.docker.internal:8093")),
 		Checkpoint: envOr("UGC_CHECKPOINT", "Illustrious-XL-v2.0.safetensors"),
+		QueueDir:   envOr("UGC_QUEUE", "/spool/queue"),
 		Timeout:    time.Duration(envInt("UGC_STAGE_TIMEOUT_SECONDS", 900)) * time.Second,
 	})
 

@@ -72,6 +72,30 @@ Náramenníky mají navíc zálohu 1 000 Robux při zalistování (ověřeno
 2026-08-22). Ve vlastní hře jde item nasadit i bez toho —
 `Humanoid:AddAccessory()` nad nahraným meshem.
 
+## Dva 3D backendy: rychlý draft, drahý finál
+
+| | SF3D | TRELLIS |
+|---|---|---|
+| čas na mesh | **~1,5 s** | ~4 min |
+| geometrie | 11k vertexů, low-poly | 32k vertexů, jemnější |
+| normály | **ano** | ne |
+| textura | 1024², bez zapečeného světla | 2048² |
+| licence | Stability Community (do $1M) | MIT |
+
+`backend: sf3d` je **výchozí** — 170× rychlejší, takže triage dostane kusy
+prakticky hned a drahý výpočet se utratí jen za to, co projde.
+`backend: trellis` je pro finální kusy, kde chceš maximum detailu.
+
+SF3D není ComfyUI node; běží jako vlastní služba na Sparku
+(`spark/sf3d-server/server.py`, port 8093) a drží model v paměti — proto
+1,5 s místo 22 s, které stojí start `run.py`.
+
+## Fronta přežije restart
+
+`ugc-pipeline` ukládá nedokončené joby do `/spool/queue` a při startu je
+načte zpět. Bez toho každý `make deploy-spark` zahodil rozdělanou práci
+(jednou to stálo pět klobouků a podruhé skoro pět hodin fronty).
+
 ## Dva modely, podle toho co se generuje
 
 | Co | Model | Prompt |

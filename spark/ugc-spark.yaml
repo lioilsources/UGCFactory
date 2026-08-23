@@ -20,6 +20,9 @@ services:
       - UGC_NAS_URL=${UGC_NAS_URL:-http://192.168.88.88:8095}
       - UGC_CHECKPOINT=${UGC_CHECKPOINT:-Illustrious-XL-v2.0.safetensors}
       - UGC_SPOOL=/spool
+      - UGC_QUEUE=/spool/queue
+      # SF3D bezi na hostu (potrebuje CUDA), stejne jako ComfyUI
+      - UGC_SF3D_URL=${UGC_SF3D_URL:-http://host.docker.internal:8093}
     volumes:
       - ugc-spool:/spool
     extra_hosts:
