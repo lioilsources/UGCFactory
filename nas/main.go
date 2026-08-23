@@ -338,6 +338,11 @@ func (s *Server) handleGLB(w http.ResponseWriter, r *http.Request) {
 	s.serveJobFile(w, r, name)
 }
 
+// Vychozi uhel kamery. TRELLIS i SF3D staví model z jednoho obrazku tak,
+// ze predek smeruje na -Z; model-viewer se pri 0 deg diva z +Z, tedy na
+// zada. 200 deg je predek s mirnym tricvrtecnim natocenim (overeno na
+// batohu i dortu, 2026-08-23).
+//
 // viewerHTML je cela stranka 3D prohlizece. Servirovana ze stejneho
 // originu jako model i skript, takze odpada localhost proxy, CORS i
 // cleartext vyjimky - presne ty tri veci, ktere na mobilech selhavaly
@@ -356,7 +361,7 @@ const viewerHTML = `<!doctype html>
 <body>
 <model-viewer src="/jobs/%s/glb" alt="%s" camera-controls auto-rotate
   touch-action="pan-y" environment-image="neutral" exposure="1.4"
-  shadow-intensity="0.6" camera-orbit="25deg 75deg 105%%" min-field-of-view="20deg"
+  shadow-intensity="0.6" camera-orbit="200deg 72deg 105%%" min-field-of-view="20deg"
   interaction-prompt="none"></model-viewer>
 <div id="err"></div>
 <script>
