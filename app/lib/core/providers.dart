@@ -87,6 +87,11 @@ final itemsProvider = FutureProvider<List<Item>>((ref) {
   return ref.watch(apiProvider).items();
 });
 
+/// Job, ktery ma triage prave ukazovat. Bez toho se bere prvni z fronty -
+/// jenze fronta se prubezne doplnuje o nove kusy ze Sparku, takze se karta
+/// pod rukama meni. Drzime se jednoho jobu, dokud o nem uzivatel nerozhodne.
+final currentTriageIdProvider = StateProvider<String?>((ref) => null);
+
 /// Joby cekajici na triage (status new), nejstarsi prvni.
 final triageQueueProvider = Provider<List<Job>>((ref) {
   final jobs = ref.watch(jobsProvider).value ?? const <Job>[];

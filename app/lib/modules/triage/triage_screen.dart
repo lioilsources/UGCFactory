@@ -16,6 +16,19 @@ class TriageScreen extends ConsumerWidget {
     final queue = ref.watch(triageQueueProvider);
     final jobsAsync = ref.watch(jobsProvider);
 
+    // Drz se rozdelaneho jobu i kdyz do fronty pribydou dalsi kusy.
+    final currentId = ref.watch(currentTriageIdProvider);
+    Job? current;
+    if (currentId != null) {
+      for (final j in queue) {
+        if (j.id == currentId) {
+          current = j;
+          break;
+        }
+      }
+    }
+    current ??= queue.isEmpty ? null : queue.first;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Triage${queue.isEmpty ? '' : ' (${queue.length})'}'),
@@ -29,9 +42,9 @@ class TriageScreen extends ConsumerWidget {
       body: jobsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _ErrorView(error: '$e'),
-        data: (_) => queue.isEmpty
+        data: (_) => current == null
             ? const _EmptyView()
-            : _TriageCard(job: queue.first, key: ValueKey(queue.first.id)),
+            : _TriageCard(job: current, key: ValueKey(current.id)),
       ),
     );
   }
@@ -64,6 +77,7 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
     Future<Job> Function() action,
     String label,
   ) async {
+    _advance(ref);
     try {
       await action();
       if (context.mounted) _snack(context, label);
@@ -72,6 +86,15 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
     } finally {
       ref.read(jobsProvider.notifier).refresh();
     }
+  }
+
+  /// Posun na dalsi kus ve fronte. Vola se pred odeslanim akce, aby triage
+  /// nezustala viset na jobu, ktery uz je rozhodnuty.
+  void _advance(WidgetRef ref) {
+    final queue = ref.read(triageQueueProvider);
+    final idx = queue.indexWhere((j) => j.id == job.id);
+    final next = (idx >= 0 && idx + 1 < queue.length) ? queue[idx + 1].id : null;
+    ref.read(currentTriageIdProvider.notifier).state = next;
   }
 
   @override
