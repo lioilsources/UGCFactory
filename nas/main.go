@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -412,8 +413,13 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 
 // remesh pozada Spark o prepocet meshe kvalitnejsim backendem.
 func (s *Server) remesh(id string) {
+	category := ""
+	if job, err := s.store.GetJob(id); err == nil {
+		category = job.Category
+	}
 	base := strings.TrimSuffix(s.spark.GenerateURL, "/ugc/generate")
-	req, err := http.NewRequest("POST", base+"/ugc/remesh/"+id+"?backend=trellis", nil)
+	req, err := http.NewRequest("POST",
+		base+"/ugc/remesh/"+id+"?backend=trellis&category="+url.QueryEscape(category), nil)
 	if err != nil {
 		return
 	}
@@ -424,13 +430,15 @@ func (s *Server) remesh(id string) {
 	log.Printf("remesh %s pres TRELLIS...", id)
 	resp, err := (&http.Client{Timeout: 15 * time.Minute}).Do(req)
 	if err != nil {
-		log.Printf("remesh %s selhal: %v", id, err)
+		log.Printf("remesh %s selhal: %v - job jde na konverzi s puvodnim meshem", id, err)
+		s.store.SetJobStatus(id, "approved", "remeshing")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		log.Printf("remesh %s: HTTP %d %s", id, resp.StatusCode, b)
+		log.Printf("remesh %s: HTTP %d %s - job jde na konverzi s puvodnim meshem", id, resp.StatusCode, b)
+		s.store.SetJobStatus(id, "approved", "remeshing")
 		return
 	}
 	if ok, err := s.store.SetJobStatus(id, "approved", "remeshing"); err != nil || !ok {

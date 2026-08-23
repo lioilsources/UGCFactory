@@ -31,7 +31,8 @@ func Register(mux *http.ServeMux, pipe *Pipeline) {
 		if backend == "" {
 			backend = "trellis"
 		}
-		if err := pipe.Remesh(r.Context(), r.PathValue("id"), backend); err != nil {
+		if err := pipe.Remesh(r.Context(), r.PathValue("id"), backend,
+			r.URL.Query().Get("category")); err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
 		}

@@ -310,9 +310,19 @@ func (p *Pipeline) run(id string) {
 //
 // Cleanplate zustava v ComfyUI output slozce, takze se negeneruje znovu
 // koncept ani odmazani pozadi - jen samotny mesh.
-func (p *Pipeline) Remesh(ctx context.Context, id, backend string) error {
+func (p *Pipeline) Remesh(ctx context.Context, id, backend, category string) error {
 	if backend != "trellis" && backend != "sf3d" {
 		return fmt.Errorf("neznamy backend %q", backend)
+	}
+	// Kategorie je v meta povinna. Job uz na Sparku byt nemusi (fronta se
+	// po dokonceni zapomina), takze ji posila NAS, ktery ma zaznam v DB.
+	if category == "" {
+		if job := p.Get(id); job != nil {
+			category = job.Req.Category
+		}
+	}
+	if category == "" {
+		return fmt.Errorf("chybi kategorie pro %s", id)
 	}
 	cleanName := id + "-clean.png"
 	clean, err := p.cfg.Comfy.View(ctx, id+"-clean_00001_.png", "ugc", "output")
@@ -338,7 +348,7 @@ func (p *Pipeline) Remesh(ctx context.Context, id, backend string) error {
 	}
 
 	meta, _ := json.Marshal(map[string]any{
-		"id": id, "backend": backend, "remeshed": true,
+		"id": id, "backend": backend, "category": category, "remeshed": true,
 	})
 	return p.cfg.NAS.Push(id, glb, nil, meta)
 }
