@@ -87,11 +87,14 @@ jdou rovnou TRELLISem — SF3D u ažurových struktur protrhne obruč a slije
 perly do hrbolů. Kompaktní tvary (kabelky, masky, ocasy, zbraně) jedou
 SF3D, kde je rozdíl neznatelný a rychlost 170×.
 
-**Draft se před finálem přepočítá.** Schválení SF3D kusu v triage ho
-nepošle rovnou do Blenderu: NAS požádá Spark o remesh TRELLISem
-(`POST /ugc/remesh/{id}`), job čeká ve stavu `remeshing` a teprve s lepším
-meshem jde na konverzi. Bez toho by draft doputoval až do finálního FBX —
-tedy by se zlepšoval jen náhled v triage, ne prodávaný produkt.
+**Draft se přepočítá až při balení, ne při triage.** Tlačítko *Zabalit*
+nad zkonvertovaným kusem vyvolá remesh TRELLISem (`POST /ugc/remesh/{id}`),
+job počká ve stavu `remeshing` a teprve s lepším meshem se rekonvertuje a
+zabalí. Nejdřív to viselo na triage approve — jenže tam se schvalují
+desítky kusů za minutu, každý spustil ~3minutový TRELLIS a fronta ComfyUI
+narostla na 111 čekajících úloh, takže výroba nových konceptů se zastavila
+na timeoutech. Pack je druhé síto: drahý výpočet se utratí jen za kusy,
+které jsi opravdu viděl a chceš.
 
 SF3D není ComfyUI node; běží jako vlastní služba na Sparku
 (`spark/sf3d-server/server.py`, port 8093) a drží model v paměti — proto
