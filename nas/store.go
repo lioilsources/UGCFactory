@@ -260,6 +260,18 @@ func (s *Store) ListItems() ([]*Item, error) {
 	return items, rows.Err()
 }
 
+// ReleaseStuckRemeshing vrati do fronty joby, jejichz remesh nepreckal
+// restart. Vola se pri startu.
+func (s *Store) ReleaseStuckRemeshing() (int, error) {
+	res, err := s.db.Exec(`UPDATE jobs SET status='approved', updated_at=? WHERE status='remeshing'`,
+		time.Now().UTC().Format(timeFmt))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *Store) Ping() error {
 	var one int
 	if err := s.db.QueryRow("SELECT 1").Scan(&one); err != nil {

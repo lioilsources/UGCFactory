@@ -98,6 +98,12 @@ func main() {
 	// Dogenerovat nahledy pro joby prijate drive, nez preview existovalo.
 	go backfillPreviews(dataDir)
 
+	// "remeshing" drzi goroutina, kterou restart zabije - joby by v tom
+	// stavu zustaly navzdy, protoze worker je zamerne ignoruje.
+	if stuck, err := store.ReleaseStuckRemeshing(); err == nil && stuck > 0 {
+		log.Printf("uvolneno %d jobu uviznulych v remeshing", stuck)
+	}
+
 	log.Printf("ugc-api listening on %s, data in %s", addr, dataDir)
 	log.Fatal(http.ListenAndServe(addr, logRequests(mux)))
 }
@@ -458,7 +464,7 @@ func (s *Server) handleReconvert(w http.ResponseWriter, r *http.Request) {
 	if job == nil {
 		return
 	}
-	if ok, err := s.store.SetJobStatus(job.ID, "approved", "converted", "failed"); err != nil || !ok {
+	if ok, err := s.store.SetJobStatus(job.ID, "approved", "converted", "failed", "remeshing"); err != nil || !ok {
 		httpErr(w, http.StatusConflict, "cannot reconvert from %q: %v", job.Status, err)
 		return
 	}
@@ -472,7 +478,7 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 	if job == nil {
 		return
 	}
-	if ok, err := s.store.SetJobStatus(job.ID, "rejected", "new", "converted", "failed"); err != nil || !ok {
+	if ok, err := s.store.SetJobStatus(job.ID, "rejected", "new", "converted", "failed", "remeshing"); err != nil || !ok {
 		httpErr(w, http.StatusConflict, "cannot reject from %q: %v", job.Status, err)
 		return
 	}
