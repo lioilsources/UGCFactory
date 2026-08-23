@@ -145,7 +145,7 @@ func (p *Pipeline) run(id string) {
 	checkpoint, product := PickModel(job.Req.Category, job.Req.Checkpoint)
 	var pos, neg string
 	if product {
-		pos, neg = productPrompt(job.Req.Prompt, job.Req.Style)
+		pos, neg = productPrompt(job.Req.Category, job.Req.Prompt, job.Req.Style)
 	} else {
 		pos, neg = PromptFor(job.Req.Category, job.Req.Style, job.Req.Prompt)
 	}

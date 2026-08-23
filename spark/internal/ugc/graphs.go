@@ -40,16 +40,31 @@ func PickModel(category, requested string) (checkpoint string, product bool) {
 	return modelAnime, false
 }
 
+// mannequinNegatives brani tomu, aby se do meshe zamodelovala figurina.
+// "hat stand" i "invisible mannequin" totiz spolehlive vyrobi bustu s
+// oblicejem - overeno na kolekci Millinery, kde z klobouku vysla cela
+// hlava na stojanu.
+const mannequinNegatives = "mannequin, dress form, bust, head, face, eyes, lips, " +
+	"neck, shoulders, torso, body, person, human, model, skin, hair, wig, " +
+	"display stand, pole, tripod"
+
+// wornOnHead jsou kategorie, kde model instinktivne dokresli hlavu.
+// Misto figuriny se pouziva hladky blok bez rysu, ktery jde snadno
+// odriznout (test 2026-08-23: "hat block" cisty, "floating" porad s bustou).
+var wornOnHead = map[string]bool{"hat": true, "helmet": true, "hair": true, "face": true}
+
 // productPrompt je ramec produktove fotky: cely predmet, zadna postava.
-func productPrompt(prompt, style string) (string, string) {
+func productPrompt(category, prompt, style string) (string, string) {
+	display := "isolated on plain white background, nothing inside the item"
+	if wornOnHead[category] {
+		display = "resting on a plain smooth featureless block, isolated on white background"
+	}
 	pos := fmt.Sprintf(
-		"product photography of %s, %s, displayed on an invisible mannequin, "+
-			"isolated on plain white background, studio lighting, "+
+		"product photography of %s, %s, %s, studio lighting, "+
 			"entire item visible, catalog photo",
-		prompt, style)
-	neg := "person, human, model, body, legs, arms, face, skin, hands, " +
-		"close-up, cropped, partial, text, watermark, signature, logo, " +
-		"blurry, child, nsfw, " + artNegatives
+		prompt, style, display)
+	neg := "legs, arms, hands, close-up, cropped, partial, text, watermark, " +
+		"signature, logo, blurry, child, nsfw, " + mannequinNegatives + ", " + artNegatives
 	return pos, neg
 }
 
