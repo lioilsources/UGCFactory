@@ -8,11 +8,16 @@ import '../../core/providers.dart';
 /// Srdce appky: swipe triage nad joby ve stavu `new`.
 /// Doprava = approve (do Blender konverze), doleva = reject,
 /// tlacitko = reroll (stejny prompt, novy seed pres NAS -> Spark).
-class TriageScreen extends ConsumerWidget {
+class TriageScreen extends ConsumerStatefulWidget {
   const TriageScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TriageScreen> createState() => _TriageScreenState();
+}
+
+class _TriageScreenState extends ConsumerState<TriageScreen> {
+  @override
+  Widget build(BuildContext context) {
     final queue = ref.watch(triageQueueProvider);
     final jobsAsync = ref.watch(jobsProvider);
 
@@ -27,7 +32,17 @@ class TriageScreen extends ConsumerWidget {
         }
       }
     }
-    current ??= queue.isEmpty ? null : queue.first;
+    if (current == null && queue.isNotEmpty) {
+      current = queue.first;
+      // Zamknout hned pri prvnim zobrazeni, jinak by se karta menila
+      // s kazdou zmenou fronty, dokud uzivatel poprve nerozhodne.
+      final lock = current.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && ref.read(currentTriageIdProvider) != lock) {
+          ref.read(currentTriageIdProvider.notifier).state = lock;
+        }
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
