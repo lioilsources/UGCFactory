@@ -151,7 +151,13 @@ func (p *Pipeline) run(id string) {
 	}
 	log.Info("concept", "model", checkpoint, "product_mode", product)
 	prefix := "ugc/" + id
-	outs, err := p.cfg.Comfy.Run(ctx, conceptGraph(checkpoint, pos, neg, job.Req.Seed, prefix+"-concept"), p.cfg.Timeout)
+	var conceptG map[string]any
+	if IsFlux(checkpoint) {
+		conceptG = fluxConceptGraph(pos, job.Req.Seed, prefix+"-concept")
+	} else {
+		conceptG = conceptGraph(checkpoint, pos, neg, job.Req.Seed, prefix+"-concept")
+	}
+	outs, err := p.cfg.Comfy.Run(ctx, conceptG, p.cfg.Timeout)
 	if err != nil {
 		fail("concept", err)
 		return

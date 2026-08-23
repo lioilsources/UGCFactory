@@ -30,8 +30,9 @@ var wearOnBody = map[string]bool{
 // z requestu ma prednost.
 func PickModel(category, requested string) (checkpoint string, product bool) {
 	if requested != "" {
-		return requested, strings.Contains(strings.ToLower(requested), "juggernaut") ||
-			strings.Contains(strings.ToLower(requested), "photo")
+		low := strings.ToLower(requested)
+		return requested, strings.Contains(low, "juggernaut") ||
+			strings.Contains(low, "photo") || strings.Contains(low, "flux")
 	}
 	if wearOnBody[category] {
 		return modelPhoto, true
@@ -70,6 +71,38 @@ func conceptGraph(checkpoint, prompt, negative string, seed int64, filenamePrefi
 		"6": node("VAEDecode", in{"samples": ref("5", 0), "vae": ref("1", 2)}),
 		"7": node("SaveImage", in{"images": ref("6", 0), "filename_prefix": filenamePrefix}),
 	}
+}
+
+// FLUX ma uplne jinou stavbu nez SDXL: unet + dva textove enkodery zvlast,
+// vlastni VAE a guidance uzel misto CFG (KSampler proto bezi na cfg 1.0).
+// Rozumi souvislemu popisu misto tagu a je vyrazne lepsi na pismena - proto
+// ho chceme na kabelky s monogramem.
+const fluxUNET = "flux1-dev.safetensors"
+
+func fluxConceptGraph(prompt string, seed int64, filenamePrefix string) map[string]any {
+	return map[string]any{
+		"1": node("UNETLoader", in{"unet_name": fluxUNET, "weight_dtype": "default"}),
+		"2": node("DualCLIPLoader", in{
+			"clip_name1": "t5xxl_fp16.safetensors",
+			"clip_name2": "clip_l.safetensors", "type": "flux"}),
+		"3": node("VAELoader", in{"vae_name": "ae.safetensors"}),
+		"4": node("CLIPTextEncode", in{"clip": ref("2", 0), "text": prompt}),
+		"5": node("FluxGuidance", in{"conditioning": ref("4", 0), "guidance": 3.5}),
+		"6": node("EmptySD3LatentImage", in{"width": 1024, "height": 1024, "batch_size": 1}),
+		// FLUX je destilovany - nema negativni prompt, proto stejny vstup
+		// v obou vetvich a cfg 1.0.
+		"7": node("KSampler", in{
+			"model": ref("1", 0), "positive": ref("5", 0), "negative": ref("4", 0),
+			"latent_image": ref("6", 0), "seed": seed, "steps": 20, "cfg": 1.0,
+			"sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}),
+		"8": node("VAEDecode", in{"samples": ref("7", 0), "vae": ref("3", 0)}),
+		"9": node("SaveImage", in{"images": ref("8", 0), "filename_prefix": filenamePrefix}),
+	}
+}
+
+// IsFlux pozna, ze se ma pouzit FLUX vetev misto SDXL.
+func IsFlux(checkpoint string) bool {
+	return strings.Contains(strings.ToLower(checkpoint), "flux")
 }
 
 // Cleanplate graph: RMBG-2.0 nad konceptem -> PNG s alfa kanalem.

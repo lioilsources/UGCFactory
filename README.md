@@ -96,6 +96,10 @@ e-shopové fotky, takže „šaty na neviditelné figuríně" jim jde přirozen�
   object focus` funguje; „no character" nakreslí item na bustě.
 - **Decimate počítá faces, Roblox trojúhelníky** — triangulovat před decimací.
   Fragmentovaný mesh (ořezaný koncept) se pod limit nedostane vůbec.
+- **`make deploy-spark` zabije rozpracovanou frontu** — ugc-pipeline drží
+  stav jobů v paměti, takže restart kontejneru zahodí vše, co ještě nedoběhlo
+  (přišlo se na to ztrátou 5 klobouků). Před nasazením zkontroluj
+  `curl spark:8092/ugc/jobs`, nebo počítej s doposláním.
 - **Docker na JODA je snap** — mountovat jde jen `/home` a `/media`;
   `/pool` i `/tmp` se tiše vyprázdní. Data proto žijí na `/media/storage/ugc`.
 - **SQLite drží data ve WAL** — při stěhování kopírovat `ugc.db` **i**
