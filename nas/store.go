@@ -260,6 +260,15 @@ func (s *Store) ListItems() ([]*Item, error) {
 	return items, rows.Err()
 }
 
+// SetJobBackend zaznamena, kterym backendem je aktualni mesh. Po remeshi
+// jinak zustane v DB puvodni "sf3d", i kdyz model uz je z TRELLISu - a pak
+// nejde poznat, jestli item nese draft nebo finalni mesh.
+func (s *Store) SetJobBackend(id, backend string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET backend=?, updated_at=? WHERE id=?`,
+		backend, time.Now().UTC().Format(timeFmt), id)
+	return err
+}
+
 // ReleaseStuckRemeshing vrati do fronty joby, jejichz remesh nepreckal
 // restart. Vola se pri startu.
 func (s *Store) ReleaseStuckRemeshing() (int, error) {

@@ -447,6 +447,9 @@ func (s *Server) remesh(id string) {
 		s.store.SetJobStatus(id, "approved", "remeshing")
 		return
 	}
+	if err := s.store.SetJobBackend(id, "trellis"); err != nil {
+		log.Printf("remesh %s: backend se nepodarilo zapsat: %v", id, err)
+	}
 	if ok, err := s.store.SetJobStatus(id, "approved", "remeshing"); err != nil || !ok {
 		log.Printf("remesh %s: nepodarilo se vratit do fronty: %v", id, err)
 		return
