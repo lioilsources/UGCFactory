@@ -60,6 +60,17 @@ func New(cfg Config) *Pipeline {
 	return p
 }
 
+// normalizeBackend doplni vychozi hodnotu. Musi platit i pro joby obnovene
+// z disku - jinak jim zustane prazdny backend a spadnou do TRELLIS vetve
+// (presne to se stalo pri prvnim nasazeni SF3D).
+func normalizeBackend(b string) string {
+	if b == "" {
+		// SF3D: ~1,5 s misto ~4 min, low-poly s UV a normalami.
+		return "sf3d"
+	}
+	return b
+}
+
 // persist ulozi nedokonceny job na disk. Bez toho restart kontejneru
 // (tedy kazdy deploy) zahodi celou frontu - stalo se to a preslo to
 // nekolik hodin prace.
@@ -104,6 +115,7 @@ func (p *Pipeline) restore() {
 			continue
 		}
 		job.Stage = "queued"
+		job.Req.Backend = normalizeBackend(job.Req.Backend)
 		p.jobs[job.ID] = &job
 		select {
 		case p.work <- job.ID:
@@ -123,11 +135,7 @@ func (p *Pipeline) Submit(req Request) (*Job, error) {
 	if req.Category == "" {
 		return nil, fmt.Errorf("missing category")
 	}
-	if req.Backend == "" {
-		// SF3D je vychozi: ~1,5 s misto ~4 min, low-poly s UV a normalami.
-		// Na finalni kusy se pak da job pregenerovat TRELLISem (vic detailu).
-		req.Backend = "sf3d"
-	}
+	req.Backend = normalizeBackend(req.Backend)
 	if req.Backend != "trellis" && req.Backend != "sf3d" {
 		return nil, fmt.Errorf("neznamy backend %q (trellis|sf3d)", req.Backend)
 	}
