@@ -49,11 +49,18 @@ func PickModel(category, requested string) (checkpoint string, product bool) {
 		return requested, strings.Contains(low, "juggernaut") ||
 			strings.Contains(low, "photo") || strings.Contains(low, "flux")
 	}
-	if wearOnBody[category] {
+	if wearOnBody[category] || creature[category] {
 		return modelPhoto, true
 	}
 	return modelAnime, false
 }
+
+// creature jsou kategorie, kde vznika ziva bytost, ne predmet. Anime
+// checkpointy sem kreslily plochou kresbu bez stinu, ze ktere rekonstrukce
+// udela relief misto objemu - a k tomu podstavec jako u sberatelske figurky.
+// Fotomodel dava mekke stinovani, tedy hloubku (test 2026-08-23: kolekce
+// "Pets foto" proti "Pets 50" a "Pets herni").
+var creature = map[string]bool{"shoulder": true}
 
 // mannequinNegatives brani tomu, aby se do meshe zamodelovala figurina.
 // "hat stand" i "invisible mannequin" totiz spolehlive vyrobi bustu s
@@ -71,6 +78,10 @@ var wornOnHead = map[string]bool{"hat": true, "helmet": true, "hair": true, "fac
 // productPrompt je ramec produktove fotky: cely predmet, zadna postava.
 func productPrompt(category, prompt, style string) (string, string) {
 	display := "isolated on plain white background, nothing inside the item"
+	if creature[category] {
+		display = "live animal, alert pose, standing on the ground, " +
+			"isolated on plain white background"
+	}
 	if wornOnHead[category] {
 		display = "resting on a plain smooth featureless block, isolated on white background"
 	}
@@ -78,8 +89,15 @@ func productPrompt(category, prompt, style string) (string, string) {
 		"product photography of %s, %s, %s, studio lighting, "+
 			"entire item visible, catalog photo",
 		prompt, style, display)
-	neg := "legs, arms, hands, close-up, cropped, partial, text, watermark, " +
-		"signature, logo, blurry, child, nsfw, " + mannequinNegatives + ", " + artNegatives
+	neg := "close-up, cropped, partial, text, watermark, " +
+		"signature, logo, blurry, child, nsfw, " + artNegatives
+	if creature[category] {
+		// Zivocich ma mit vlastni telo i konceniny; z negativu zustava jen
+		// to, co dela z mazlicka figurku.
+		neg += ", pedestal, base, plinth, display stand, figurine, statue, toy"
+	} else {
+		neg += ", legs, arms, hands, " + mannequinNegatives
+	}
 	return pos, neg
 }
 
