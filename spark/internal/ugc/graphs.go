@@ -21,6 +21,21 @@ const (
 	modelPhoto = "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
 )
 
+// needsFineMesh jsou kategorie, kde SF3D nestaci. Ma jeden pruchod dopredu,
+// takze tenke azurove struktury protrhne - korunka z nej vysla s utrzenou
+// obruci a perlami slitymi do hrbolu, zatimco TRELLIS je difuzni a detail
+// dopocita (srovnani 2026-08-23). U kompaktnich tvaru (kabelky, masky,
+// ocasy, zbrane) rozdil videt neni a SF3D je 170x rychlejsi.
+var needsFineMesh = map[string]bool{"hat": true, "helmet": true, "neck": true}
+
+// DefaultBackend vraci vhodny 3D backend pro kategorii.
+func DefaultBackend(category string) string {
+	if needsFineMesh[category] {
+		return "trellis"
+	}
+	return "sf3d"
+}
+
 // wearOnBody jsou kategorie, ktere danbooru modely neumi samostatne.
 var wearOnBody = map[string]bool{
 	"hair": true, "neck": true, "front": true, "waist": true,

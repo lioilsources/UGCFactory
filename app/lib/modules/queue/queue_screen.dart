@@ -11,7 +11,7 @@ class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
 
   static const _order = [
-    'new', 'approved', 'converting', 'converted', 'packed',
+    'new', 'remeshing', 'approved', 'converting', 'converted', 'packed',
     'failed', 'rejected', 'rerolled',
   ];
 
@@ -72,6 +72,7 @@ class QueueScreen extends ConsumerWidget {
 
   static String _label(String s) => switch (s) {
         'new' => 'Ceka na triage',
+        'remeshing' => 'Prepocitava se v TRELLIS (~4 min)',
         'approved' => 'Ve fronte na konverzi',
         'converting' => 'Konvertuje se',
         'converted' => 'Zkonvertovano - ceka na 3D review',

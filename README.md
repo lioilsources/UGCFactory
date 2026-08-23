@@ -82,9 +82,16 @@ Náramenníky mají navíc zálohu 1 000 Robux při zalistování (ověřeno
 | textura | 1024², bez zapečeného světla | 2048² |
 | licence | Stability Community (do $1M) | MIT |
 
-`backend: sf3d` je **výchozí** — 170× rychlejší, takže triage dostane kusy
-prakticky hned a drahý výpočet se utratí jen za to, co projde.
-`backend: trellis` je pro finální kusy, kde chceš maximum detailu.
+**Výchozí backend se volí podle kategorie.** Šperky (`hat`, `helmet`, `neck`)
+jdou rovnou TRELLISem — SF3D u ažurových struktur protrhne obruč a slije
+perly do hrbolů. Kompaktní tvary (kabelky, masky, ocasy, zbraně) jedou
+SF3D, kde je rozdíl neznatelný a rychlost 170×.
+
+**Draft se před finálem přepočítá.** Schválení SF3D kusu v triage ho
+nepošle rovnou do Blenderu: NAS požádá Spark o remesh TRELLISem
+(`POST /ugc/remesh/{id}`), job čeká ve stavu `remeshing` a teprve s lepším
+meshem jde na konverzi. Bez toho by draft doputoval až do finálního FBX —
+tedy by se zlepšoval jen náhled v triage, ne prodávaný produkt.
 
 SF3D není ComfyUI node; běží jako vlastní služba na Sparku
 (`spark/sf3d-server/server.py`, port 8093) a drží model v paměti — proto

@@ -58,6 +58,36 @@ def cleanup(obj):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+# Nad timto poctem komponent uz nejde o detaily, ale o roztristeny mesh,
+# ktery se bez cisteni nedostane pod limit trojuhelniku.
+FRAGMENT_THRESHOLD = 40
+
+
+def count_components(obj):
+    """Spocita odpojene casti bez toho, aby cokoli menila."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    seen = set()
+    n = 0
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        n += 1
+        stack = [f]
+        seen.add(f.index)
+        while stack:
+            face = stack.pop()
+            for e in face.edges:
+                for nb in e.link_faces:
+                    if nb.index not in seen:
+                        seen.add(nb.index)
+                        stack.append(nb)
+    bm.free()
+    return n
+
+
 def remove_floaters(obj, keep_fraction=0.02, max_components=None):
     """Smaze odpojene komponenty mensi nez keep_fraction celkovych faces;
     s max_components navic nechá jen N nejvetsich.
@@ -133,7 +163,14 @@ def retopo(obj, backend, max_tris):
         mod.voxel_size = voxel
         bpy.ops.object.modifier_apply(modifier=mod.name)
 
-    components, removed = remove_floaters(obj)
+    # Mazat odpojene casti az kdyz je to nutne. U sperku jsou drobne
+    # oddelene kusy legitimni obsah - perly, kameny, visici pridavky - a
+    # slepe mazani "floateru" ubralo koruně 1414 trojuhelniku vcetne perel.
+    # Fragmentovany mesh (stovky komponent) se resi az v eskalaci nize.
+    components = count_components(obj)
+    removed = 0
+    if components > FRAGMENT_THRESHOLD:
+        components, removed = remove_floaters(obj)
     print(f"components: {components}, floater faces removed: {removed}", flush=True)
 
     mod = obj.modifiers.new("Tri", "TRIANGULATE")

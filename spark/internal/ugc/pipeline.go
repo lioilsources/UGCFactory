@@ -63,10 +63,9 @@ func New(cfg Config) *Pipeline {
 // normalizeBackend doplni vychozi hodnotu. Musi platit i pro joby obnovene
 // z disku - jinak jim zustane prazdny backend a spadnou do TRELLIS vetve
 // (presne to se stalo pri prvnim nasazeni SF3D).
-func normalizeBackend(b string) string {
+func normalizeBackend(b, category string) string {
 	if b == "" {
-		// SF3D: ~1,5 s misto ~4 min, low-poly s UV a normalami.
-		return "sf3d"
+		return DefaultBackend(category)
 	}
 	return b
 }
@@ -115,7 +114,7 @@ func (p *Pipeline) restore() {
 			continue
 		}
 		job.Stage = "queued"
-		job.Req.Backend = normalizeBackend(job.Req.Backend)
+		job.Req.Backend = normalizeBackend(job.Req.Backend, job.Req.Category)
 		p.jobs[job.ID] = &job
 		select {
 		case p.work <- job.ID:
@@ -135,7 +134,7 @@ func (p *Pipeline) Submit(req Request) (*Job, error) {
 	if req.Category == "" {
 		return nil, fmt.Errorf("missing category")
 	}
-	req.Backend = normalizeBackend(req.Backend)
+	req.Backend = normalizeBackend(req.Backend, req.Category)
 	if req.Backend != "trellis" && req.Backend != "sf3d" {
 		return nil, fmt.Errorf("neznamy backend %q (trellis|sf3d)", req.Backend)
 	}
@@ -303,6 +302,45 @@ func (p *Pipeline) run(id string) {
 	}
 	p.forget(id)
 	log.Info("ugc job done", "took", time.Since(started).Round(time.Second))
+}
+
+// Remesh znovu vyrobi mesh existujiciho jobu jinym backendem a pushne ho
+// na NAS. Slouzi k tomu, aby draft ze SF3D nedosel az do finalniho FBX -
+// po schvaleni v triage se prepocita TRELLISem.
+//
+// Cleanplate zustava v ComfyUI output slozce, takze se negeneruje znovu
+// koncept ani odmazani pozadi - jen samotny mesh.
+func (p *Pipeline) Remesh(ctx context.Context, id, backend string) error {
+	if backend != "trellis" && backend != "sf3d" {
+		return fmt.Errorf("neznamy backend %q", backend)
+	}
+	cleanName := id + "-clean.png"
+	clean, err := p.cfg.Comfy.View(ctx, id+"-clean_00001_.png", "ugc", "output")
+	if err != nil || len(clean) == 0 {
+		return fmt.Errorf("cleanplate pro %s nenalezen: %w", id, err)
+	}
+
+	var glb []byte
+	if backend == "sf3d" {
+		glb, err = p.cfg.SF3D.Mesh(ctx, clean)
+	} else {
+		if err = p.cfg.Comfy.UploadImage(ctx, cleanName, clean); err != nil {
+			return err
+		}
+		var outs map[string]any
+		outs, err = p.cfg.Comfy.Run(ctx, trellisGraph(cleanName, 0, "3D/"+id), p.cfg.Timeout)
+		if err == nil {
+			glb, err = p.meshFile(ctx, outs, id)
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	meta, _ := json.Marshal(map[string]any{
+		"id": id, "backend": backend, "remeshed": true,
+	})
+	return p.cfg.NAS.Push(id, glb, nil, meta)
 }
 
 // firstImage finds the first SaveImage output in history outputs and

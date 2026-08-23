@@ -217,6 +217,19 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		Collection: meta.Collection, Meta: json.RawMessage(metaStr),
 	}
 	if err := s.store.InsertJob(job); err != nil {
+		// Remesh posila stejne id znovu: soubory uz jsou prepsane vyse,
+		// zaznam v DB zustava (drzi verdikt, kolekci, stav triage).
+		if existing, getErr := s.store.GetJob(meta.ID); getErr == nil {
+			log.Printf("job %s uz existuje - prepsan mesh (%s)", meta.ID, meta.Backend)
+			os.Remove(filepath.Join(dir, "preview.glb"))
+			go func() {
+				if err := makePreviewGLB(filepath.Join(dir, "model.glb"), filepath.Join(dir, "preview.glb")); err != nil {
+					log.Printf("preview GLB pro %s selhalo: %v", meta.ID, err)
+				}
+			}()
+			writeJSON(w, http.StatusOK, existing)
+			return
+		}
 		httpErr(w, http.StatusConflict, "insert: %v", err)
 		return
 	}
@@ -373,6 +386,16 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusConflict, "cannot approve: %v", err)
 			return
 		}
+		// Draft ze SF3D nema jit do finalniho FBX - po schvaleni se mesh
+		// prepocita TRELLISem. Bezi na pozadi (~4 min), worker si job
+		// vezme az potom, protoze push prepise model.glb.
+		if job.Backend == "sf3d" && s.spark.GenerateURL != "" {
+			// Worker bere jen "approved", takze mezistav ho podrzi, dokud
+			// nedorazi lepsi mesh - jinak by zkonvertoval stary SF3D draft.
+			if ok, _ := s.store.SetJobStatus(job.ID, "remeshing", "approved"); ok {
+				go s.remesh(job.ID)
+			}
+		}
 	case "converted":
 		if err := s.pack(job); err != nil {
 			httpErr(w, http.StatusInternalServerError, "pack: %v", err)
@@ -385,6 +408,39 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	job, _ = s.store.GetJob(job.ID)
 	s.broker.Publish("job.updated", job)
 	writeJSON(w, http.StatusOK, job)
+}
+
+// remesh pozada Spark o prepocet meshe kvalitnejsim backendem.
+func (s *Server) remesh(id string) {
+	base := strings.TrimSuffix(s.spark.GenerateURL, "/ugc/generate")
+	req, err := http.NewRequest("POST", base+"/ugc/remesh/"+id+"?backend=trellis", nil)
+	if err != nil {
+		return
+	}
+	if s.spark.ClientID != "" {
+		req.Header.Set("CF-Access-Client-Id", s.spark.ClientID)
+		req.Header.Set("CF-Access-Client-Secret", s.spark.ClientSecret)
+	}
+	log.Printf("remesh %s pres TRELLIS...", id)
+	resp, err := (&http.Client{Timeout: 15 * time.Minute}).Do(req)
+	if err != nil {
+		log.Printf("remesh %s selhal: %v", id, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		log.Printf("remesh %s: HTTP %d %s", id, resp.StatusCode, b)
+		return
+	}
+	if ok, err := s.store.SetJobStatus(id, "approved", "remeshing"); err != nil || !ok {
+		log.Printf("remesh %s: nepodarilo se vratit do fronty: %v", id, err)
+		return
+	}
+	if job, err := s.store.GetJob(id); err == nil {
+		s.broker.Publish("job.updated", job)
+	}
+	log.Printf("remesh %s hotov, jde na konverzi", id)
 }
 
 // handleReconvert sends a converted-or-failed job through the worker again —
