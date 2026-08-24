@@ -328,7 +328,10 @@ def main():
     uv_ok = ensure_uv(obj)
     tex_path = os.path.join(out_dir, "model_tex.png")
     bake_texture(obj, tex_path)
-    fit_and_orient(obj, spec["bbox_studs"])
+    # bbox_studs je strop, ne cil - skaluje se na target_studs (viz _notes2
+    # ve spec/roblox_spec.json). Job smi poslat vlastni a prebit kategorii.
+    target = job.get("target_studs") or spec.get("target_studs") or spec["bbox_studs"]
+    fit_and_orient(obj, target)
     add_attachment(obj, spec["attachment"])
     fbx_path = os.path.join(out_dir, "model.fbx")
     export_fbx(fbx_path)
@@ -340,6 +343,10 @@ def main():
         "texture_size": BAKE_SIZE,
         "bbox": [round(d, 4) for d in obj.dimensions],
         "bbox_limit_studs": spec["bbox_studs"],
+        "bbox_target_studs": target,
+        "bbox_within_limit": all(
+            d <= l + 1e-3 for d, l in zip(obj.dimensions, (spec["bbox_studs"][0], spec["bbox_studs"][2], spec["bbox_studs"][1]))
+        ),
         "watertight": watertight(obj),
         "components": components,
         "floater_faces_removed": floaters_removed,

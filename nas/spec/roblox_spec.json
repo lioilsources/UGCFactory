@@ -1,5 +1,6 @@
 {
   "_source": "create.roblox.com/docs/art/accessories/specifications, overeno 2026-08-21",
+  "_notes2": "bbox_studs je STROP Marketplace, ne cilova velikost. Puvodne se do nej skaloval kazdy mesh, takze skolni batoh vysel 8.6 studu siroky - vetsi nez cela postava (overeno ve Studiu 2026-08-24). Skaluje se proto na target_studs; kdyz chybi, padne se zpet na bbox_studs. Job smi poslat vlastni target_studs a prebit oboji - to je zpusob, jak v jedne kategorii bydli batoh i rozepjata kridla.",
   "_notes": "bbox_studs = Normal (Rthro) scale; Accessory Fitting Tool umi attachment vygenerovat sam, jmeno je konvence pro 3D importer. Marketplace strop textury je 2048, bake drzime na 1024 (rychlost CPU bake, mensi soubory).",
   "texture_max_px": 1024,
   "material": {"type": "Plastic", "transparency": 0, "vertex_color": [1, 1, 1]},
@@ -10,7 +11,9 @@
     "neck":     {"max_tris": 4000, "attachment": "NeckAttachment",     "bbox_studs": [2.95, 3.68, 2.16]},
     "shoulder": {"max_tris": 4000, "attachment": "ShoulderAttachment", "bbox_studs": [2.67, 4.40, 3.09]},
     "front":    {"max_tris": 4000, "attachment": "BodyFrontAttachment","bbox_studs": [2.95, 3.68, 3.24]},
-    "back":     {"max_tris": 4000, "attachment": "BodyBackAttachment", "bbox_studs": [9.86, 8.59, 4.87]},
+    "back":     {"max_tris": 4000, "attachment": "BodyBackAttachment", "bbox_studs": [9.86, 8.59, 4.87],
+                 "target_studs": [2.00, 2.60, 1.00],
+                 "_note": "target = batoh, zmereno na figurine ve Studiu 2026-08-24. Kridla a stity musi poslat vlastni target_studs, jinak se zmensi na batoh."},
     "waist":    {"max_tris": 4000, "attachment": "WaistBackAttachment","bbox_studs": [3.94, 4.29, 7.57]},
     "sword":    {"max_tris": 4000, "attachment": "RightGripAttachment","bbox_studs": [1.20, 4.20, 1.20],
                  "_note": "gear/handheld neni Marketplace accessory kategorie - drzime pro budouci use"},
