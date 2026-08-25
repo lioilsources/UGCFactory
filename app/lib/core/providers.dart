@@ -82,6 +82,13 @@ class JobsNotifier extends AsyncNotifier<List<Job>> {
   }
 }
 
+/// Fronta pro triage primo ze serveru - jen status "new", at ji neprebiji
+/// hotove kusy. Prekresli se pri kazde zmene jobu.
+final triageJobsProvider = FutureProvider<List<Job>>((ref) {
+  ref.watch(jobsProvider);
+  return ref.watch(apiProvider).jobs(status: 'new', limit: 1000);
+});
+
 final itemsProvider = FutureProvider<List<Item>>((ref) {
   ref.watch(jobsProvider); // items se meni jen kdyz se hybou joby
   return ref.watch(apiProvider).items();
@@ -93,8 +100,15 @@ final itemsProvider = FutureProvider<List<Item>>((ref) {
 final currentTriageIdProvider = StateProvider<String?>((ref) => null);
 
 /// Joby cekajici na triage (status new), nejstarsi prvni.
+///
+/// Filtruje se nad [triageJobsProvider], ktery si o "new" rekne primo
+/// serveru. Drive se bralo z [jobsProvider] a filtrovalo az v appce - jenze
+/// ten stahuje 200 nejnovejsich jobu pres vsechny stavy, takze jakmile
+/// tovarna vyrobila 200 kusu novejsich nez nejstarsi netriazovany job,
+/// zadny "new" uz se do okna nevesel a Triage vypadala prazdna, i kdyz v ni
+/// cekalo 138 kusu (2026-08-25).
 final triageQueueProvider = Provider<List<Job>>((ref) {
-  final jobs = ref.watch(jobsProvider).value ?? const <Job>[];
+  final jobs = ref.watch(triageJobsProvider).value ?? const <Job>[];
   final fresh = jobs.where((j) => j.status == 'new').toList()
     ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
   return fresh;
