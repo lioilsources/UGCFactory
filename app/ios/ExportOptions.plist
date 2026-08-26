@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- teamID doplni workflow z IOS_TEAM_ID, at neni v repu natvrdo. -->
+	<key>teamID</key>
+	<string>CI_TEAM_ID</string>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<!-- Automaticke podepisovani: xcodebuild si profil vyzada pres
+	     App Store Connect API klic (-allowProvisioningUpdates), takze se
+	     do secrets nemusi cpat .p12 ani .mobileprovision. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>

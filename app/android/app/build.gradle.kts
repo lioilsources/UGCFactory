@@ -1,3 +1,15 @@
+import java.util.Properties
+
+// Upload keystore. Bez nej se release podepisoval debug klicem, ktery si kazdy
+// stroj generuje vlastni - na CI tedy pokazde jiny, a Firebase build by sel na
+// telefonu nainstalovat jen po odinstalaci toho predchoziho.
+// key.properties do repa nepatri; CI si ho sklada ze secrets.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasUploadKey = keystoreProperties.getProperty("storeFile") != null
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -25,11 +37,25 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("upload") {
+            if (hasUploadKey) {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Bez key.properties (lokalni `flutter run --release`) se pouzije
+            // debug klic, aby build nespadl.
+            signingConfig = if (hasUploadKey)
+                signingConfigs.getByName("upload")
+            else
+                signingConfigs.getByName("debug")
         }
     }
 }

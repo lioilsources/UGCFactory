@@ -1,0 +1,71 @@
+# Android -> Firebase App Distribution.
+#
+# Rychla vetev: build je hotovy za par minut a testerum prijde notifikace
+# okamzite, bez Applí kontroly. Podepisuje se stabilnim upload keystorem ze
+# secrets - kdyby se pouzil debug klic, mel by kazdy beh CI jiny podpis a
+# tester by musel appku pred kazdou aktualizaci odinstalovat.
+name: Firebase Android
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Poznamky pro testery'
+        required: false
+        default: ''
+
+jobs:
+  distribute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+
+      - name: Build number z poradi behu
+        working-directory: app
+        run: |
+          BASE=$(grep '^version:' pubspec.yaml | sed -E 's/^version: ([0-9.]+).*/\1/')
+          sed -i.bak -E "s/^version: .*/version: ${BASE}+${{ github.run_number }}/" pubspec.yaml
+          rm -f pubspec.yaml.bak
+          grep '^version:' pubspec.yaml
+
+      - name: Upload keystore ze secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          echo -n "$KEYSTORE_B64" | base64 --decode > app/android/upload.jks
+          cat > app/android/key.properties <<EOF
+          storeFile=upload.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=upload
+          keyPassword=$KEYSTORE_PASSWORD
+          EOF
+
+      - name: Build APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release \
+            --dart-define=CF_CLIENT_ID="${{ secrets.UGC_CF_CLIENT_ID }}" \
+            --dart-define=CF_CLIENT_SECRET="${{ secrets.UGC_CF_CLIENT_SECRET }}"
+
+      - name: Rozeslat pres Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          groups: testers
+          releaseNotes: ${{ github.event.inputs.notes || github.ref_name }}
+          file: app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Uklid podpisoveho materialu
+        if: always()
+        run: rm -f app/android/upload.jks app/android/key.properties
