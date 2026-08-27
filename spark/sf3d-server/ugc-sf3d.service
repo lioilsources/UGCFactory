@@ -1,0 +1,26 @@
+# SF3D jako trvala sluzba na hostu Sparku (CUDA, proto ne v containeru).
+#
+#   scp spark/sf3d-server/ugc-sf3d.service spark:~/.config/systemd/user/
+#   ssh spark 'loginctl enable-linger $USER && \
+#              systemctl --user daemon-reload && \
+#              systemctl --user enable --now ugc-sf3d'
+#
+# Bez teto sluzby se SF3D spousti rucne a po restartu stroje chybi - cela
+# davka mazlicku pak spadne na "mesh-sf3d: connection refused" az ve fazi
+# meshe, tedy potom, co uz se zaplatil koncept i cleanplate (2026-08-27).
+# HF token si bere z ~/.cache/huggingface, zadny secret v unitu neni.
+
+[Unit]
+Description=SF3D img->3D HTTP sluzba pro UGC tovarnu (port 8093)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Code/stable-fast-3d
+ExecStart=%h/Code/stable-fast-3d/.venv/bin/python sf3d-server/server.py
+# Nacteni modelu trva desitky sekund; drzi se v pameti, aby mesh byl 1,5 s.
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -98,7 +98,12 @@ které jsi opravdu viděl a chceš.
 
 SF3D není ComfyUI node; běží jako vlastní služba na Sparku
 (`spark/sf3d-server/server.py`, port 8093) a drží model v paměti — proto
-1,5 s místo 22 s, které stojí start `run.py`.
+1,5 s místo 22 s, které stojí start `run.py`. Hlídá ji **user systemd unit**
+`spark/sf3d-server/ugc-sf3d.service` (`systemctl --user status ugc-sf3d`);
+instalace je v komentáři v unitu. Dokud se spouštěla ručně, po restartu
+stroje chyběla a celá dávka mazlíčků spadla na `mesh-sf3d: connection
+refused` — a to až ve fázi meshe, tedy po zaplacení konceptu i cleanplate
+(2026-08-27). HF token si bere z `~/.cache/huggingface`, v unitu žádný není.
 
 ## Fronta přežije restart
 
