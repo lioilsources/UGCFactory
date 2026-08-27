@@ -166,6 +166,11 @@ Nahledy zkonvertovaného kusu (triage vidí jen vstupní GLB, ne výsledné FBX)
 
 ## Provozní znalosti (draze zaplacené)
 
+- **Podstavec z konceptu nevyženeš pozitivním promptem.** Dort bez „cake
+  stand" v promptu a rovnou s „sitting directly on the surface" vyšel na
+  zlaté míse na obou seedech (2026-08-27). Musí do negativu — proto
+  `standNegatives` u `wornOnHead`. Šikmá noha stojanu navíc nakloní celý mesh.
+
 - **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí
   „success". `Trellis2UnWrapAndRasterizer` **musí** dostat `bvh` z generátoru.
   Validační chyby jsou v odpovědi na `POST /prompt` — číst je.

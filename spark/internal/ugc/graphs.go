@@ -70,6 +70,14 @@ const mannequinNegatives = "mannequin, dress form, bust, head, face, eyes, lips,
 	"neck, shoulders, torso, body, person, human, model, skin, hair, wig, " +
 	"display stand, pole, tripod"
 
+// standNegatives vyhazuji podstavec zpod predmetu. "display stand" v
+// mannequinNegatives na to nestaci: Juggernaut posadi dort na ozdobnou misu,
+// i kdyz o ni prompt nerekne ani slovo a rovnou zada "sitting directly on
+// the surface" (overeno 2026-08-27 na dvou seedech). Vadi to dvakrat - misa
+// se zamodeluje do meshe a jeji sikma noha navic nakloni cely kus.
+const standNegatives = "cake stand, cake board, pedestal, platter, plate, " +
+	"tray, serving dish, podium, riser, velvet stand"
+
 // wornOnHead jsou kategorie, kde model instinktivne dokresli hlavu.
 // Misto figuriny se pouziva hladky blok bez rysu, ktery jde snadno
 // odriznout (test 2026-08-23: "hat block" cisty, "floating" porad s bustou).
@@ -97,6 +105,9 @@ func productPrompt(category, prompt, style string) (string, string) {
 		neg += ", pedestal, base, plinth, display stand, figurine, statue, toy"
 	} else {
 		neg += ", legs, arms, hands, " + mannequinNegatives
+		if wornOnHead[category] {
+			neg += ", " + standNegatives
+		}
 	}
 	return pos, neg
 }
