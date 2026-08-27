@@ -21,10 +21,14 @@ DECIMATE_TARGET_FRACTION = 0.9    # cil = 0.9 x max_tris (rezerva na triangulaci
 BAKE_SIZE = 1024
 RADIAL_SECTORS = 3                # dort/korunka: 120 stupnu dokola
 
-# Predni smer po importu GLB. glTF se diva na scenu po +Z; Blender ji pri
-# importu prevede na Z-up, cimz se z +Z stane -Y - a s -Y jako "forward"
-# pocita i export_fbx nize.
-FRONT_ANGLE = -math.pi / 2
+# Predni smer po importu GLB, tedy ta strana, kterou model opravdu videl.
+# Oba backendy stavi mesh s prednou stranou na glTF -Z (proto ma prohlizec
+# vychozi orbit 200 stupnu misto nuly); Blender pri importu prevede Y-up na
+# Z-up, cimz se z glTF -Z stane +Y. Overeno renderem dortu z obou stran
+# proti konceptu: na +Y jsou ostre potekle polevy z predlohy, na -Y rozmazana
+# domyslena zada. Znamenko tady rozhoduje, jestli se dokola kopiruje videna,
+# nebo vymyslena strana - a spatne otocene to vypada uveritelne.
+FRONT_ANGLE = math.pi / 2
 
 
 def parse_args():

@@ -132,7 +132,14 @@ pokyn o kameře u předmětů ignorují.
 U kusů, které radiálně symetrické opravdu jsou (dort, korunka), je proto
 levnější přední výseč zkopírovat než zadní stranu dogenerovat. Job nese
 pole `symmetry`; s hodnotou `radial` nechá `convert.py` po retopu 120°
-výseč kolem osy Z, dvakrát ji otočí a šev svaří. Kopie nesou UV originálu,
+výseč kolem osy Z, dvakrát ji otočí a šev svaří.
+
+**Přední strana je v Blenderu +Y, ne −Y.** Oba backendy staví mesh čelem
+k glTF −Z (proto má prohlížeč výchozí orbit 200°), a import Y-up → Z-up
+z toho udělá +Y. Znaménko rozhoduje, jestli se dokola kopíruje viděná, nebo
+domyšlená strana — a špatně otočené to vypadá věrohodně, protože kopie
+domyšlené strany je pořád konzistentní. Ověřeno renderem dortu proti
+konceptu: na +Y jsou ostré potečené polevy z předlohy, na −Y rozmazaná záda. Kopie nesou UV originálu,
 takže zdobení dokola obstará už existující EMIT bake — žádný krok navíc.
 
 Zapíná se v Composeru (*Zdobení dokola*) a u už vygenerovaných kusů

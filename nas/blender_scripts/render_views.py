@@ -84,10 +84,10 @@ def main():
     radius = max(obj.dimensions) * 2.4
 
     for deg in [float(a) for a in args.angles.split(",")]:
-        # 0 stupnu = pohled zepredu, tedy z -Y (stejna konvence jako
-        # FRONT_ANGLE v convert.py a axis_forward u exportu).
+        # 0 stupnu = pohled zepredu, tedy z +Y - to je strana, kterou model
+        # videl (viz FRONT_ANGLE v convert.py). 180 je domyslena zada.
         offset = Matrix.Rotation(math.radians(deg), 4, "Z") @ Vector(
-            (0.0, -radius, radius * math.tan(math.radians(args.elevation))))
+            (0.0, radius, radius * math.tan(math.radians(args.elevation))))
         cam.location = center + offset
         cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
         path = os.path.join(args.dir, "%s_%03d.png" % (args.out_prefix, int(deg)))
