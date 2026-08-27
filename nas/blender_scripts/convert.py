@@ -283,11 +283,23 @@ def radial_symmetrize(obj, sectors=RADIAL_SECTORS):
             bm, cent=center, verts=[e for e in dup if isinstance(e, bmesh.types.BMVert)],
             matrix=Matrix.Rotation(2 * math.pi * i / sectors, 3, "Z"))
 
-    # Svar jen na svu. Prah je zlomek velikosti modelu, ne absolutni cislo -
-    # GLB z TRELLISu a ze SF3D nemaji stejne meritko.
+    # Svarit sev. Rez v uhlu -150 stupnu a rez v -30 stupnu jsou dva ruzne
+    # prurezy meshem, takze se po otoceni nekryji uplne - prah proto musi
+    # byt stedry (zlomek velikosti modelu, ne absolutni cislo; GLB z TRELLISu
+    # a ze SF3D nemaji stejne meritko). Aby stedrost neslepila detail, jde
+    # svar jen pres vrcholy na okraji: uvnitr vysece se nic nehne.
     before = len(bm.verts)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=span * 0.004)
+    boundary = [v for v in bm.verts if any(len(e.link_faces) < 2 for e in v.link_edges)]
+    if boundary:
+        bmesh.ops.remove_doubles(bm, verts=boundary, dist=span * 0.02)
     welded = before - len(bm.verts)
+
+    # Co po svaru zbylo, je uzka trhlina podel svu - zaplnit, at model
+    # zustane watertight (jinak kazdy symetricky kus konci na WARN a v
+    # renderu je videt prasklina).
+    holes = [e for e in bm.edges if len(e.link_faces) < 2]
+    if holes:
+        bmesh.ops.holes_fill(bm, edges=holes, sides=0)
 
     bm.to_mesh(obj.data)
     obj.data.update()
@@ -382,13 +394,15 @@ def export_fbx(path):
     )
 
 
-def watertight(obj):
+def open_edge_count(obj):
+    """Hrany bez druhe steny. Nula = watertight; male cislo u symetrickeho
+    kusu znamena zbytkovou trhlinu na svu, ne rozpadly mesh."""
     import bmesh
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    open_edges = sum(1 for e in bm.edges if len(e.link_faces) < 2)
+    n = sum(1 for e in bm.edges if len(e.link_faces) < 2)
     bm.free()
-    return open_edges == 0
+    return n
 
 
 def main():
@@ -429,6 +443,7 @@ def main():
     fbx_path = os.path.join(out_dir, "model.fbx")
     export_fbx(fbx_path)
 
+    open_edges = open_edge_count(obj)
     report = {
         "tri_count": tris,
         "max_tris": spec["max_tris"],
@@ -440,7 +455,8 @@ def main():
         "bbox_within_limit": all(
             d <= l + 1e-3 for d, l in zip(obj.dimensions, (spec["bbox_studs"][0], spec["bbox_studs"][2], spec["bbox_studs"][1]))
         ),
-        "watertight": watertight(obj),
+        "watertight": open_edges == 0,
+        "open_edges": open_edges,
         "components": components,
         "floater_faces_removed": floaters_removed,
         "symmetry": symmetry,

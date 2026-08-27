@@ -140,6 +140,23 @@ Zapíná se v Composeru (*Zdobení dokola*) a u už vygenerovaných kusů
 Sparku kvůli tomu není potřeba. Report konverze pak nese `symmetry` a
 `symmetry_seam_verts` (kolik vrcholů se svařilo na švu).
 
+**Zapínat jen tam, kde symetrie opravdu je.** Ověřeno 2026-08-27: třípatrový
+dort i vysoká královská koruna vyjdou zezadu zdobené a šev je sotva znát;
+„agate slice headband crown" (plochý plátek achátu na stojánku) se stejným
+nastavením rozpadl na slepenec tří výsečí. Radiální je koruna dokola, ne
+každý kus v kolekci Crowns.
+
+Šev zůstává jako vlásečnice: po svaření okrajových vrcholů a zaplnění děr
+jich zbývá ~13 otevřených hran z ~5400, takže symetrický kus končí na
+`WARN: mesh neni watertight`. Report proto nese i `open_edges` — malé číslo
+je zbytek švu, velké rozpadlý mesh.
+
+Nahledy zkonvertovaného kusu (triage vidí jen vstupní GLB, ne výsledné FBX):
+
+    docker exec ugcfactory-ugc-blender-1 blender -b --factory-startup -noaudio \
+      -P /app/blender_scripts/render_views.py -- \
+      --dir /data/converted/<id> --angles 0,180
+
 ## Provozní znalosti (draze zaplacené)
 
 - **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí
