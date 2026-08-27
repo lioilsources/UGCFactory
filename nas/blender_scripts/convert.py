@@ -303,7 +303,18 @@ def radial_symmetrize(obj, sectors=RADIAL_SECTORS):
     # renderu je videt prasklina).
     holes = [e for e in bm.edges if len(e.link_faces) < 2]
     if holes:
-        bmesh.ops.holes_fill(bm, edges=holes, sides=0)
+        patches = set(bmesh.ops.holes_fill(bm, edges=holes, sides=0)["faces"])
+        # Nove steny prijdou s UV v nule, tedy s rohem atlasu - a ten byva
+        # cerny, takze se z neviditelne trhliny stane cerna sparka. Kazdy
+        # roh zaplaty proto prevezme UV od steny, na kterou navazuje.
+        uv = bm.loops.layers.uv.active
+        if uv is not None:
+            for face in patches:
+                for loop in face.loops:
+                    src = next((l for l in loop.vert.link_loops
+                                if l.face not in patches), None)
+                    if src is not None:
+                        loop[uv].uv = src[uv].uv
 
     bm.to_mesh(obj.data)
     obj.data.update()
