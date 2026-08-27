@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -23,7 +24,8 @@ type Job struct {
 	Backend    string          `json:"backend,omitempty"`
 	Seed       int64           `json:"seed,omitempty"`
 	Collection string          `json:"collection,omitempty"`
-	Verdict    string          `json:"verdict,omitempty"` // PASS/WARN/FAIL po konverzi
+	Symmetry   string          `json:"symmetry,omitempty"` // "" | radial (viz convert.py)
+	Verdict    string          `json:"verdict,omitempty"`  // PASS/WARN/FAIL po konverzi
 	Error      string          `json:"error,omitempty"`
 	Report     json.RawMessage `json:"report,omitempty"` // validate report z convert.py
 	Meta       json.RawMessage `json:"meta,omitempty"`   // syrovy meta JSON ze Sparku
@@ -67,6 +69,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   category TEXT NOT NULL DEFAULT '', style TEXT DEFAULT '', backend TEXT DEFAULT '',
   seed INTEGER DEFAULT 0, collection TEXT DEFAULT '', verdict TEXT DEFAULT '',
   error TEXT DEFAULT '', report TEXT DEFAULT '', meta TEXT DEFAULT '',
+  symmetry TEXT DEFAULT '',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
@@ -78,7 +81,19 @@ CREATE TABLE IF NOT EXISTS items (
   state TEXT NOT NULL DEFAULT 'packed',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Sloupce doplnene pozdeji. SQLite nema ADD COLUMN IF NOT EXISTS, takze
+	// se hlaska o duplicite polyka - na uz migrovane DB je to ocekavany stav.
+	for _, alter := range []string{
+		`ALTER TABLE jobs ADD COLUMN symmetry TEXT DEFAULT ''`,
+	} {
+		if _, err := s.db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 const timeFmt = time.RFC3339
@@ -90,10 +105,10 @@ func (s *Store) InsertJob(j *Job) error {
 		j.Status = "new"
 	}
 	_, err := s.db.Exec(`INSERT INTO jobs
-		(id,status,prompt,category,style,backend,seed,collection,verdict,error,report,meta,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(id,status,prompt,category,style,backend,seed,collection,verdict,error,report,meta,symmetry,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, j.Status, j.Prompt, j.Category, j.Style, j.Backend, j.Seed, j.Collection,
-		j.Verdict, j.Error, string(j.Report), string(j.Meta),
+		j.Verdict, j.Error, string(j.Report), string(j.Meta), j.Symmetry,
 		j.CreatedAt.Format(timeFmt), j.UpdatedAt.Format(timeFmt))
 	return err
 }
@@ -102,7 +117,8 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
 	var report, meta, created, updated string
 	if err := row.Scan(&j.ID, &j.Status, &j.Prompt, &j.Category, &j.Style, &j.Backend,
-		&j.Seed, &j.Collection, &j.Verdict, &j.Error, &report, &meta, &created, &updated); err != nil {
+		&j.Seed, &j.Collection, &j.Verdict, &j.Error, &report, &meta, &j.Symmetry,
+		&created, &updated); err != nil {
 		return nil, err
 	}
 	if report != "" {
@@ -116,7 +132,7 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	return &j, nil
 }
 
-const jobCols = "id,status,prompt,category,style,backend,seed,collection,verdict,error,report,meta,created_at,updated_at"
+const jobCols = "id,status,prompt,category,style,backend,seed,collection,verdict,error,report,meta,symmetry,created_at,updated_at"
 
 func (s *Store) GetJob(id string) (*Job, error) {
 	return scanJob(s.db.QueryRow("SELECT "+jobCols+" FROM jobs WHERE id = ?", id))
@@ -266,6 +282,14 @@ func (s *Store) ListItems() ([]*Item, error) {
 func (s *Store) SetJobBackend(id, backend string) error {
 	_, err := s.db.Exec(`UPDATE jobs SET backend=?, updated_at=? WHERE id=?`,
 		backend, time.Now().UTC().Format(timeFmt), id)
+	return err
+}
+
+// SetJobSymmetry prepne symetrii uz prijateho jobu - cesta, jak dat zadni
+// stranu i kusum, ktere uz visi v triage (reconvert?symmetry=radial).
+func (s *Store) SetJobSymmetry(id, symmetry string) error {
+	_, err := s.db.Exec(`UPDATE jobs SET symmetry=?, updated_at=? WHERE id=?`,
+		symmetry, time.Now().UTC().Format(timeFmt), id)
 	return err
 }
 

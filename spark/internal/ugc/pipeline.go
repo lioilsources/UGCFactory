@@ -34,6 +34,9 @@ type Request struct {
 	Seed       int64  `json:"seed"`
 	RerollOf   string `json:"reroll_of"`
 	Checkpoint string `json:"checkpoint"` // volitelny override
+	// Symetrie se tady jen veze - resi ji az Blender na NASu (convert.py),
+	// ale do jobu se musi dostat pres meta, ktera vznika tady.
+	Symmetry string `json:"symmetry"`
 }
 
 type Job struct {
@@ -137,6 +140,9 @@ func (p *Pipeline) Submit(req Request) (*Job, error) {
 	req.Backend = normalizeBackend(req.Backend, req.Category)
 	if req.Backend != "trellis" && req.Backend != "sf3d" {
 		return nil, fmt.Errorf("neznamy backend %q (trellis|sf3d)", req.Backend)
+	}
+	if req.Symmetry != "" && req.Symmetry != "radial" {
+		return nil, fmt.Errorf("neznama symetrie %q (radial)", req.Symmetry)
 	}
 	if req.Seed == 0 {
 		req.Seed = time.Now().UnixNano() % 2147483647
@@ -291,6 +297,7 @@ func (p *Pipeline) run(id string) {
 		"id": id, "prompt": job.Req.Prompt, "category": job.Req.Category,
 		"style": job.Req.Style, "backend": job.Req.Backend, "seed": job.Req.Seed,
 		"collection": job.Req.Collection, "reroll_of": job.Req.RerollOf,
+		"symmetry":   job.Req.Symmetry,
 		"checkpoint": checkpoint, "created_at": job.CreatedAt.Format(time.RFC3339),
 	}
 	metaJSON, _ := json.Marshal(meta)

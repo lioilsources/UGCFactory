@@ -2,7 +2,8 @@
 
     blender -b -P convert.py -- --job /data/jobs/<id>.json
 
-Job JSON: {"id", "category", "backend", "glb": in, "out_dir": out, "spec": path}
+Job JSON: {"id", "category", "backend", "glb": in, "out_dir": out, "spec": path,
+"symmetry": "" | "radial"}
 Kroky dle UGC_FORGE_PLAN.md: import, cleanup, retopo/decimate, UV, CPU bake
 (EMIT s prepojenym base color - zadna svetla), orientace+scale do bbox
 kategorie, attachment empty, FBX export + validate report JSON.
@@ -18,6 +19,12 @@ import bpy
 VOXEL_ADAPTIVE_FRACTION = 0.008   # voxel size ~ 0.8 % nejdelsi hrany bboxu
 DECIMATE_TARGET_FRACTION = 0.9    # cil = 0.9 x max_tris (rezerva na triangulaci)
 BAKE_SIZE = 1024
+RADIAL_SECTORS = 3                # dort/korunka: 120 stupnu dokola
+
+# Predni smer po importu GLB. glTF se diva na scenu po +Z; Blender ji pri
+# importu prevede na Z-up, cimz se z +Z stane -Y - a s -Y jako "forward"
+# pocita i export_fbx nize.
+FRONT_ANGLE = -math.pi / 2
 
 
 def parse_args():
@@ -142,6 +149,19 @@ def has_uv(obj):
     return bool(obj.data.uv_layers)
 
 
+def decimate_to(obj, target):
+    """Collapse decimate ve smycce, dokud mesh neni pod cilem - jeden
+    pruchod ho mine, viz poznamka u retopo()."""
+    for _ in range(4):
+        tris = tri_count(obj)
+        if tris <= target:
+            break
+        mod = obj.modifiers.new("Decimate", "DECIMATE")
+        mod.ratio = target / tris
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    return tri_count(obj)
+
+
 def retopo(obj, backend, max_tris):
     """Vraci (tri_count, components, removed_floater_faces).
 
@@ -176,13 +196,7 @@ def retopo(obj, backend, max_tris):
     mod = obj.modifiers.new("Tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
 
-    for _ in range(4):
-        tris = tri_count(obj)
-        if tris <= target:
-            break
-        mod = obj.modifiers.new("Decimate", "DECIMATE")
-        mod.ratio = target / tris
-        bpy.ops.object.modifier_apply(modifier=mod.name)
+    decimate_to(obj, target)
 
     # Eskalace: collapse decimate ma dno - u roztristeneho meshe se zastavi
     # (zmereno: 5188 -> 5184 a dal ne, protoze 762 komponent nejde slucovat).
@@ -209,6 +223,76 @@ def retopo(obj, backend, max_tris):
         print("remesh escalation %d: voxel=%.5f -> %d tris" % (attempt, voxel, tri_count(obj)), flush=True)
 
     return tri_count(obj), components, removed
+
+
+def radial_symmetrize(obj, sectors=RADIAL_SECTORS):
+    """Ponecha predni vysec kolem osy Z a otoci ji dokola.
+
+    Model z jednoho obrazku ma zdobenou jen prednu stranu; zadni si TRELLIS
+    domysli a vyjde plocha. U predmetu, ktere radialne symetricke opravdu
+    jsou - dort, korunka - je levnejsi prednu vysec zkopirovat nez zadni
+    stranu dogenerovat (pokus o "rear view" prompt 2026-08-27 selhal, SDXL
+    pokyn o kamere u predmetu ignoruje).
+
+    Kopie nesou UV originalu, takze zdobeni dokola obstara uz stavajici
+    EMIT bake - zadny zvlastni krok pro texturu.
+
+    Vraci (pocet vrcholu svarenych na svu, tri_count po operaci).
+    """
+    import bmesh
+    from mathutils import Matrix, Vector
+
+    if sectors < 2:
+        return 0, tri_count(obj)
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    if not bm.verts:
+        bm.free()
+        raise RuntimeError("prazdny mesh pred symetrizaci")
+
+    # Osa jde stredem bboxu v XY - origin je v tuhle chvili jeste tam, kam
+    # ho polozil import (fit_and_orient ho sroubuje az na konci).
+    xs = [v.co.x for v in bm.verts]
+    ys = [v.co.y for v in bm.verts]
+    center = Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, 0.0))
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+
+    # Dva rezy pres osu vymezi vysec 360/sectors stupnu kolem predniho smeru.
+    # Normala roviny miri vzdy po smeru rostouciho uhlu, takze u dolniho rezu
+    # padne zaporna strana a u horniho kladna; pro sectors >= 3 je vysec uzsi
+    # nez 180 stupnu, takze prunik obou polorovin je presne ona.
+    half = math.pi / sectors
+    for angle, keep_positive in ((FRONT_ANGLE - half, True), (FRONT_ANGLE + half, False)):
+        bmesh.ops.bisect_plane(
+            bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+            dist=span * 1e-4, plane_co=center,
+            plane_no=Vector((-math.sin(angle), math.cos(angle), 0.0)),
+            clear_inner=keep_positive, clear_outer=not keep_positive)
+    loose = [v for v in bm.verts if not v.link_faces]
+    if loose:
+        bmesh.ops.delete(bm, geom=loose, context="VERTS")
+    if not bm.faces:
+        bm.free()
+        raise RuntimeError("symetrizace odrizla cely mesh (spatna osa?)")
+
+    wedge = list(bm.verts) + list(bm.edges) + list(bm.faces)
+    for i in range(1, sectors):
+        dup = bmesh.ops.duplicate(bm, geom=wedge)["geom"]
+        bmesh.ops.rotate(
+            bm, cent=center, verts=[e for e in dup if isinstance(e, bmesh.types.BMVert)],
+            matrix=Matrix.Rotation(2 * math.pi * i / sectors, 3, "Z"))
+
+    # Svar jen na svu. Prah je zlomek velikosti modelu, ne absolutni cislo -
+    # GLB z TRELLISu a ze SF3D nemaji stejne meritko.
+    before = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=span * 0.004)
+    welded = before - len(bm.verts)
+
+    bm.to_mesh(obj.data)
+    obj.data.update()
+    bm.free()
+    return welded, tri_count(obj)
 
 
 def ensure_uv(obj):
@@ -325,6 +409,15 @@ def main():
     obj = import_glb(job["glb"])
     cleanup(obj)
     tris, components, floaters_removed = retopo(obj, job.get("backend", ""), spec["max_tris"])
+    symmetry = job.get("symmetry") or ""
+    seam_verts = 0
+    if symmetry == "radial":
+        seam_verts, tris = radial_symmetrize(obj)
+        # Rezy pridaji hrany, takze trojice vyseci cil o kus prestreli.
+        if tris > spec["max_tris"]:
+            tris = decimate_to(obj, int(spec["max_tris"] * DECIMATE_TARGET_FRACTION))
+        print("radial symmetry: %d sectors, %d verts welded, %d tris"
+              % (RADIAL_SECTORS, seam_verts, tris), flush=True)
     uv_ok = ensure_uv(obj)
     tex_path = os.path.join(out_dir, "model_tex.png")
     bake_texture(obj, tex_path)
@@ -350,6 +443,8 @@ def main():
         "watertight": watertight(obj),
         "components": components,
         "floater_faces_removed": floaters_removed,
+        "symmetry": symmetry,
+        "symmetry_seam_verts": seam_verts,
         "material_count": len(obj.data.materials),
         "attachment": spec["attachment"],
         "fbx": os.path.basename(fbx_path),

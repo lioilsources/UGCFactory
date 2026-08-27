@@ -55,10 +55,16 @@ class UgcApi {
   Future<Job> approve(String id) => _post('/jobs/$id/approve');
   Future<Job> reject(String id) => _post('/jobs/$id/reject');
   Future<Job> reroll(String id) => _post('/jobs/$id/reroll');
-  Future<Job> reconvert(String id) => _post('/jobs/$id/reconvert');
+  /// Rekonverze uz prijateho jobu. [symmetry] prepne symetrii pred tim, nez
+  /// job zamiri do fronty ('radial' zdobi dokola, 'none' vypina); bez nej
+  /// zustane ta, se kterou job prisel.
+  Future<Job> reconvert(String id, {String? symmetry}) => _post(
+        '/jobs/$id/reconvert',
+        symmetry == null ? null : {'symmetry': symmetry},
+      );
 
-  Future<Job> _post(String path) async {
-    final resp = await _client.post(_u(path), headers: authHeaders);
+  Future<Job> _post(String path, [Map<String, String>? query]) async {
+    final resp = await _client.post(_u(path, query), headers: authHeaders);
     _check(resp);
     return Job.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
@@ -70,6 +76,7 @@ class UgcApi {
     required String style,
     required String collection,
     int? seed,
+    String symmetry = '',
   }) async {
     final resp = await _client.post(
       _u('/generate'),
@@ -80,6 +87,7 @@ class UgcApi {
         'style': style,
         'collection': collection,
         if (seed != null) 'seed': seed,
+        if (symmetry.isNotEmpty) 'symmetry': symmetry,
       }),
     );
     _check(resp);

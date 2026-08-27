@@ -121,6 +121,25 @@ e-shopové fotky, takže „šaty na neviditelné figuríně" jim jde přirozen�
 (srovnávací test 2026-08-22: Illustrious drak, Juggernaut i FLUX správně
 šaty; FLUX je 3× pomalejší, proto výchozí Juggernaut).
 
+## Zadní strana: symetrie místo dalšího pohledu
+
+Model vzniká z jednoho obrázku, takže zadní stranu nikdo neviděl — TRELLIS
+si ji domýšlí a vyjde plochá a nezdobená. **„Rear view" prompting nefunguje:**
+při stejném seedu vyrobil Juggernaut z pokynu „zezadu" ženu v klobouku ve
+tříčtvrtečním pohledu a draka zase zepředu (test 2026-08-27). SDXL modely
+pokyn o kameře u předmětů ignorují.
+
+U kusů, které radiálně symetrické opravdu jsou (dort, korunka), je proto
+levnější přední výseč zkopírovat než zadní stranu dogenerovat. Job nese
+pole `symmetry`; s hodnotou `radial` nechá `convert.py` po retopu 120°
+výseč kolem osy Z, dvakrát ji otočí a šev svaří. Kopie nesou UV originálu,
+takže zdobení dokola obstará už existující EMIT bake — žádný krok navíc.
+
+Zapíná se v Composeru (*Zdobení dokola*) a u už vygenerovaných kusů
+`POST /jobs/{id}/reconvert?symmetry=radial` (`none` vypíná) — nový běh
+Sparku kvůli tomu není potřeba. Report konverze pak nese `symmetry` a
+`symmetry_seam_verts` (kolik vrcholů se svařilo na švu).
+
 ## Provozní znalosti (draze zaplacené)
 
 - **ComfyUI tiše vyřadí nody** s chybějícím povinným vstupem a ohlásí

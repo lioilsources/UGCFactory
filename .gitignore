@@ -2,3 +2,4 @@ nas/web/
 **/build/
 .DS_Store
 app/.cf-token
+nas/ugc-backend

@@ -7,6 +7,7 @@ class Job {
   final String style;
   final String backend;
   final String collection;
+  final String symmetry;
   final String verdict;
   final String error;
   final Map<String, dynamic>? report;
@@ -21,6 +22,7 @@ class Job {
     required this.style,
     required this.backend,
     required this.collection,
+    required this.symmetry,
     required this.verdict,
     required this.error,
     required this.report,
@@ -36,6 +38,7 @@ class Job {
         style: j['style'] as String? ?? '',
         backend: j['backend'] as String? ?? '',
         collection: j['collection'] as String? ?? '',
+        symmetry: j['symmetry'] as String? ?? '',
         verdict: j['verdict'] as String? ?? '',
         error: j['error'] as String? ?? '',
         report: j['report'] as Map<String, dynamic>?,

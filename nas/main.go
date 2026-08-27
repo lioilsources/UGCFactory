@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -181,6 +182,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		Backend    string `json:"backend"`
 		Seed       int64  `json:"seed"`
 		Collection string `json:"collection"`
+		Symmetry   string `json:"symmetry"`
 	}
 	if err := json.Unmarshal([]byte(metaStr), &meta); err != nil {
 		httpErr(w, http.StatusBadRequest, "meta: %v", err)
@@ -221,7 +223,8 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	job := &Job{
 		ID: meta.ID, Status: "new", Prompt: meta.Prompt, Category: meta.Category,
 		Style: meta.Style, Backend: meta.Backend, Seed: meta.Seed,
-		Collection: meta.Collection, Meta: json.RawMessage(metaStr),
+		Collection: meta.Collection, Symmetry: meta.Symmetry,
+		Meta: json.RawMessage(metaStr),
 	}
 	if err := s.store.InsertJob(job); err != nil {
 		// Remesh posila stejne id znovu: soubory uz jsou prepsane vyse,
@@ -486,7 +489,29 @@ func (s *Server) handleReconvert(w http.ResponseWriter, r *http.Request) {
 	if job == nil {
 		return
 	}
-	if ok, err := s.store.SetJobStatus(job.ID, "approved", "converted", "failed", "remeshing"); err != nil || !ok {
+	// Stav se overuje dvakrat: tady, aby odmitnuty pozadavek nenechal
+	// prepsanou symetrii, a jeste jednou jako CAS nize proti zavodu s workerem.
+	reconvertFrom := []string{"converted", "failed", "remeshing"}
+	if !slices.Contains(reconvertFrom, job.Status) {
+		httpErr(w, http.StatusConflict, "cannot reconvert from %q", job.Status)
+		return
+	}
+	// Symetrie musi byt v DB driv, nez job zamiri do fronty - jinak si ho
+	// worker muze vzit jeste se starou hodnotou.
+	if sym := r.URL.Query().Get("symmetry"); sym != "" {
+		if sym == "none" {
+			sym = ""
+		}
+		if sym != "" && sym != "radial" {
+			httpErr(w, http.StatusBadRequest, "neznama symetrie %q (radial|none)", sym)
+			return
+		}
+		if err := s.store.SetJobSymmetry(job.ID, sym); err != nil {
+			httpErr(w, http.StatusInternalServerError, "symmetry: %v", err)
+			return
+		}
+	}
+	if ok, err := s.store.SetJobStatus(job.ID, "approved", reconvertFrom...); err != nil || !ok {
 		httpErr(w, http.StatusConflict, "cannot reconvert from %q: %v", job.Status, err)
 		return
 	}
@@ -527,6 +552,7 @@ func (s *Server) handleReroll(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]any{
 		"prompt": job.Prompt, "category": job.Category, "style": job.Style,
 		"backend": job.Backend, "collection": job.Collection, "reroll_of": job.ID,
+		"symmetry": job.Symmetry,
 	})
 	if err := s.callSpark(payload); err != nil {
 		httpErr(w, http.StatusBadGateway, "spark: %v", err)

@@ -37,6 +37,7 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
   final Set<String> _selected = {'helmet'};
   String _style = stylePresets.first;
   int _variants = 1;
+  bool _radial = false;
   bool _sending = false;
 
   @override
@@ -46,6 +47,7 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
     _promptCtrl.text = prefs.getString('composer.prompt') ?? '';
     _collectionCtrl.text = prefs.getString('composer.collection') ?? '';
     _style = prefs.getString('composer.style') ?? stylePresets.first;
+    _radial = prefs.getBool('composer.radial') ?? false;
   }
 
   @override
@@ -64,6 +66,7 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
     await prefs.setString('composer.prompt', prompt);
     await prefs.setString('composer.collection', collection);
     await prefs.setString('composer.style', _style);
+    await prefs.setBool('composer.radial', _radial);
 
     setState(() => _sending = true);
     final api = ref.read(apiProvider);
@@ -78,6 +81,7 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
             category: cat,
             style: _style,
             collection: collection,
+            symmetry: _radial ? 'radial' : '',
             seed: DateTime.now().microsecondsSinceEpoch % 2147483647 + v,
           );
           sent++;
@@ -146,7 +150,18 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
               border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          // Model z jednoho obrazku ma zdobenou jen prednu stranu. U kusu,
+          // ktere jsou radialne symetricke doopravdy (dort, korunka), se
+          // pri konverzi predni vysec otoci dokola - viz convert.py.
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Zdobeni dokola'),
+            subtitle: const Text('radialni symetrie - dorty, korunky'),
+            value: _radial,
+            onChanged: (v) => setState(() => _radial = v),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Text('Varianty na kategorii: $_variants'),

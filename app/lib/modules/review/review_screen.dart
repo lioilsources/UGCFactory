@@ -89,6 +89,13 @@ class ReviewScreen extends ConsumerWidget {
                         value: '${report['texture_size']} px',
                         ok: true,
                       ),
+                    if ((report['symmetry'] as String? ?? '').isNotEmpty)
+                      _Stat(
+                        label: 'symetrie',
+                        value: '${report['symmetry']}'
+                            ' (sev ${report['symmetry_seam_verts'] ?? 0})',
+                        ok: true,
+                      ),
                   ],
                 ),
                 for (final r
@@ -117,7 +124,24 @@ class ReviewScreen extends ConsumerWidget {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  // Zadni strana kusu, ktery ma byt symetricky, se opravi
+                  // rekonverzi - novy beh Sparku kvuli tomu neni potreba.
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.donut_large),
+                    tooltip: 'Znovu se symetrii',
+                    onSelected: (sym) async {
+                      await api.reconvert(job.id, symmetry: sym);
+                      ref.read(jobsProvider.notifier).refresh();
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'radial',
+                        child: Text('Zdobeni dokola (radialni)'),
+                      ),
+                      PopupMenuItem(value: 'none', child: Text('Bez symetrie')),
+                    ],
+                  ),
                   Expanded(
                     child: FilledButton.icon(
                       icon: const Icon(Icons.inventory_2),

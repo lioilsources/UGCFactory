@@ -45,6 +45,7 @@ def convert(job):
             "id": job_id,
             "category": job.get("category", "hat"),
             "backend": job.get("backend", ""),
+            "symmetry": job.get("symmetry", ""),
             "glb": os.path.join(DATA, "incoming", job_id, "model.glb"),
             "out_dir": out_dir,
             "spec": SPEC,
