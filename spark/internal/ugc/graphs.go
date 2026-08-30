@@ -197,11 +197,11 @@ func trellisGraph(inputImage string, seed int64, filenamePrefix string) map[stri
 			"pipeline": ref("1", 0), "image": ref("3", 0), "seed": seed,
 			"pipeline_type": "1024_cascade", "sparse_structure_steps": 12,
 			"shape_steps": 12, "texture_steps": 12, "max_num_tokens": 49152,
-			// TRELLIS si pri texturovani renderuje vlastni pohledy. Vic
-			// pohledu = lepsi pokryti zadni strany bez noveho vstupu -
-			// jedina paka na kusy, ktere radialne symetricke nejsou
-			// (klobouky). Plati se ~minutou navic na kus.
-			"max_views": 8, "sparse_structure_resolution": 32,
+			// max_views 4 staci: GLB ma zadni stranu cistou uz pri ctyrech
+			// pohledech (klobouk z Millinery, 2026-08-27). Pokus s 8 stal
+			// ~minutu na kus a lecil rozsypanou texturu, ktera ve skutecnosti
+			// vznikala az v convert.py (UV po voxel remeshi).
+			"max_views": 4, "sparse_structure_resolution": 32,
 			"generate_texture_slat": true, "use_tiled_decoder": true,
 			"sampler": "euler", "fill_holes": true, "hole_iterations": 1,
 			"hole_fill_algorithm": "flood_fill", "keep_only_shell": true}),
