@@ -491,7 +491,9 @@ func (s *Server) handleReconvert(w http.ResponseWriter, r *http.Request) {
 	}
 	// Stav se overuje dvakrat: tady, aby odmitnuty pozadavek nenechal
 	// prepsanou symetrii, a jeste jednou jako CAS nize proti zavodu s workerem.
-	reconvertFrom := []string{"converted", "failed", "remeshing"}
+	// "packed" je v seznamu kvuli prebaleni uz hotoveho kusu po oprave
+	// convert.py; pack pak katalogova data zachova (viz pack).
+	reconvertFrom := []string{"converted", "failed", "remeshing", "packed"}
 	if !slices.Contains(reconvertFrom, job.Status) {
 		httpErr(w, http.StatusConflict, "cannot reconvert from %q", job.Status)
 		return
@@ -701,10 +703,33 @@ func (s *Server) pack(job *Job) error {
 		}
 	}
 	item := &Item{ID: job.ID, Name: name, Category: job.Category, Collection: job.Collection, State: "packed"}
+	// Prebaleni (napr. po oprave convert.py) nesmi zahodit to, co uz nekdo
+	// vyplnil v appce - UpsertItem prepisuje vsechny sloupce, takze by se
+	// jmeno, popisy, cena i tagy vratily na vychozi hodnoty.
+	//
+	// Stav se naopak zamerne vraci na "packed": v packed/ lezi cerstve FBX,
+	// takze predchozi upload uz neplati a kus chce nahrat znovu.
+	if prev, err := s.store.GetItem(job.ID); err == nil && prev != nil {
+		if prev.Name != "" {
+			item.Name = prev.Name
+		}
+		item.DescriptionCS, item.DescriptionEN = prev.DescriptionCS, prev.DescriptionEN
+		item.PriceRobux, item.Tags, item.Limited = prev.PriceRobux, prev.Tags, prev.Limited
+		item.CreatedAt = prev.CreatedAt
+	}
+	limited := map[string]any{"enabled": false}
+	if len(item.Limited) > 0 {
+		_ = json.Unmarshal(item.Limited, &limited)
+	}
+	tags := []any{}
+	if len(item.Tags) > 0 {
+		_ = json.Unmarshal(item.Tags, &tags)
+	}
 	itemJSON, _ := json.MarshalIndent(map[string]any{
-		"name": name, "description_cs": "", "description_en": "",
-		"category": job.Category, "price_robux": 0, "tags": []string{},
-		"collection": job.Collection, "limited": map[string]any{"enabled": false},
+		"name": item.Name, "description_cs": item.DescriptionCS,
+		"description_en": item.DescriptionEN,
+		"category":       job.Category, "price_robux": item.PriceRobux, "tags": tags,
+		"collection": job.Collection, "limited": limited,
 	}, "", "  ")
 	if err := os.WriteFile(filepath.Join(dst, "item.json"), append(itemJSON, '\n'), 0o644); err != nil {
 		return err
@@ -712,7 +737,7 @@ func (s *Server) pack(job *Job) error {
 	if err := s.store.UpsertItem(item); err != nil {
 		return err
 	}
-	if ok, err := s.store.SetJobStatus(job.ID, "packed", "converted"); err != nil || !ok {
+	if ok, err := s.store.SetJobStatus(job.ID, "packed", "converted", "packed"); err != nil || !ok {
 		return errors.New("job moved during pack")
 	}
 	s.broker.Publish("item.created", item)

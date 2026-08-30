@@ -169,6 +169,15 @@ Nahledy zkonvertovaného kusu (triage vidí jen vstupní GLB, ne výsledné FBX)
       -P /app/blender_scripts/render_views.py -- \
       --dir /data/converted/<id> --angles 0,180
 
+## Přebalení už hotového kusu
+
+`POST /jobs/{id}/reconvert` bere i stav `packed` — po opravě `convert.py`
+tak jde zabalený kus protáhnout znovu bez nového generování. `pack` při tom
+**slučuje** katalogová data místo přepisu: jméno, popisy, cena a tagy
+vyplněné v appce přežijí (`UpsertItem` přepisuje všechny sloupce, takže bez
+toho by spadly na výchozí hodnoty). Stav se naopak vrací na `packed` —
+v `packed/` leží čerstvé FBX, takže předchozí upload do Studia už neplatí.
+
 ## Provozní znalosti (draze zaplacené)
 
 - **Podstavec z konceptu nevyženeš pozitivním promptem.** Dort bez „cake
