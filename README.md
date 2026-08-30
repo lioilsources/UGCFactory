@@ -181,6 +181,14 @@ Nahledy zkonvertovaného kusu (triage vidí jen vstupní GLB, ne výsledné FBX)
   Validační chyby jsou v odpovědi na `POST /prompt` — číst je.
 - **Illustrious mluví danbooru tagy**, ne anglicky. `no humans, still life,
   object focus` funguje; „no character" nakreslí item na bustě.
+- **Voxel remesh zahodí UV, textura se proto na cíl projektuje.** Dřív se
+  peklo přímo na retopo mesh přes jeho vlastní UV: po remeshi je
+  `smart_project` vyrobil znovu a bake četl původní atlas TRELLISu přes
+  cizí UV — z klobouků, korun i dortů vyšly konfety, zatímco SF3D (remesh
+  přeskakuje) vypadal v pořádku (2026-08-30). `convert.py` teď drží
+  originál s UV vedle jako zdroj a peče Selected-to-Active projekcí na
+  retopo kopii. Symetrie se dělá už na zdroji, takže voxel remesh z ní
+  postaví cíl bez švu a projekce na záda bere viděnou stranu.
 - **Decimate počítá faces, Roblox trojúhelníky** — triangulovat před decimací.
   Fragmentovaný mesh (ořezaný koncept) se pod limit nedostane vůbec.
 - **`make deploy-spark` zabije rozpracovanou frontu** — ugc-pipeline drží

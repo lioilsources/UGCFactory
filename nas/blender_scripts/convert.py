@@ -20,6 +20,12 @@ VOXEL_ADAPTIVE_FRACTION = 0.008   # voxel size ~ 0.8 % nejdelsi hrany bboxu
 DECIMATE_TARGET_FRACTION = 0.9    # cil = 0.9 x max_tris (rezerva na triangulaci)
 BAKE_SIZE = 1024
 RADIAL_SECTORS = 3                # dort/korunka: 120 stupnu dokola
+# Bake projekci zdroj -> cil. Paprsek startuje kousek nad cilovym povrchem
+# a hleda zdroj smerem dovnitr; mezera mezi nimi je voxel (0.8 %) plus
+# chyba decimace, takze 2.5 % staci, 8 % je strop, aby se u tenke krempy
+# netrefila spodni strana.
+CAGE_EXTRUSION_FRACTION = 0.025
+RAY_DISTANCE_FRACTION = 0.08
 
 # Predni smer po importu GLB, tedy ta strana, kterou model opravdu videl.
 # Oba backendy stavi mesh s prednou stranou na glTF -Z (proto ma prohlizec
@@ -59,8 +65,23 @@ def import_glb(path):
     return obj
 
 
-def cleanup(obj):
+def activate(obj):
+    """Jediny vybrany a aktivni objekt - bpy.ops se na to spolehaji."""
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
+
+
+def duplicate(obj, name):
+    dup = obj.copy()
+    dup.data = obj.data.copy()
+    dup.name = name
+    bpy.context.scene.collection.objects.link(dup)
+    return dup
+
+
+def cleanup(obj):
+    activate(obj)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.remove_doubles(threshold=0.0001)
@@ -179,6 +200,7 @@ def retopo(obj, backend, max_tris):
     (prakticky 1-2 pruchody). Bez toho front plate vysel na 6398 tris
     pri "3600" faces."""
     target = int(max_tris * DECIMATE_TARGET_FRACTION)
+    activate(obj)
     if backend != "sf3d":
         dims = obj.dimensions
         voxel = max(max(dims) * VOXEL_ADAPTIVE_FRACTION, 0.0005)
@@ -323,8 +345,12 @@ def radial_symmetrize(obj, sectors=RADIAL_SECTORS):
 
 
 def ensure_uv(obj):
+    """Voxel remesh UV zahodi, takze cil z TRELLIS drahy je bez nich a
+    dostane smart_project. Zdrojovy atlas se pres tyhle UV nikdy necte -
+    textura se na cil projektuje z originalu (bake_texture)."""
     if has_uv(obj):
         return True
+    activate(obj)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.uv.smart_project(island_margin=0.02)
@@ -332,15 +358,18 @@ def ensure_uv(obj):
     return has_uv(obj)
 
 
-def bake_texture(obj, out_png):
-    """Diffuse bake pres EMIT: base color kazdeho materialu se prepoji na
-    emission, takze bake nepocita svetla - na CPU bezi rychle."""
+def bake_texture(source, target, out_png):
+    """Diffuse bake projekci: zdroj (original s UV a texturou) -> cil
+    (retopo). Selected-to-Active, EMIT s prepojenym base color, takze se
+    nepocitaji svetla a na CPU to bezi rychle.
+
+    Drive se peklo primo na cili pres jeho vlastni UV. Voxel remesh ale UV
+    zahodi, smart_project vyrobi nove a bake pak cetl puvodni atlas pres
+    cizi UV - z klobouku i dortu vysly konfety (2026-08-27, cela TRELLIS
+    draha; SF3D remesh preskakuje, proto vypadal v poradku)."""
     img = bpy.data.images.new("bake", BAKE_SIZE, BAKE_SIZE, alpha=False)
-    if not obj.data.materials:
-        mat = bpy.data.materials.new("Material")
-        mat.use_nodes = True
-        obj.data.materials.append(mat)
-    for mat in obj.data.materials:
+
+    for mat in source.data.materials:
         if mat is None or not mat.use_nodes:
             continue
         nt = mat.node_tree
@@ -354,19 +383,33 @@ def bake_texture(obj, out_png):
             else:
                 emit.inputs["Color"].default_value = base.default_value
         nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.image = img
-        nt.nodes.active = tex
 
+    # Cil dostane jediny cisty material s bake obrazkem - Roblox chce jeden
+    # a bake pise do aktivniho image nodu aktivniho objektu.
+    mat = bpy.data.materials.new("Material")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    nt.nodes.active = tex
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf:
+        nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    target.data.materials.clear()
+    target.data.materials.append(mat)
+
+    size = max(source.dimensions)
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.cycles.samples = 4      # EMIT bake nema sum, staci minimum
     scene.render.bake.margin = 4
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.bake(type="EMIT")
+    activate(target)
+    source.select_set(True)
+    bpy.ops.object.bake(
+        type="EMIT", use_selected_to_active=True, use_cage=False,
+        cage_extrusion=size * CAGE_EXTRUSION_FRACTION,
+        max_ray_distance=size * RAY_DISTANCE_FRACTION)
     img.filepath_raw = out_png
     img.file_format = "PNG"
     img.save()
@@ -376,6 +419,7 @@ def fit_and_orient(obj, bbox_studs):
     """Scale do bbox kategorie a origin do stredu. Roblox pri FBX importu
     cte +Z up / -Y forward konvenci exporteru (axis overeno testovacim
     meshem ve Studiu - viz README)."""
+    activate(obj)
     bpy.ops.object.origin_set(type="ORIGIN_CENTER_OF_VOLUME", center="MEDIAN")
     obj.location = (0, 0, 0)
     dims = obj.dimensions
@@ -435,21 +479,26 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     reset_scene()
-    obj = import_glb(job["glb"])
-    cleanup(obj)
-    tris, components, floaters_removed = retopo(obj, job.get("backend", ""), spec["max_tris"])
+    source = import_glb(job["glb"])
+    cleanup(source)
+    # Symetrie se dela na zdroji, ne na cili: kopie vysece nesou puvodni
+    # UV, takze projekce na zada bere videnou stranu. Voxel remesh z toho
+    # pak postavi cil jako jednu skorapku bez svu.
     symmetry = job.get("symmetry") or ""
     seam_verts = 0
     if symmetry == "radial":
-        seam_verts, tris = radial_symmetrize(obj)
-        # Rezy pridaji hrany, takze trojice vyseci cil o kus prestreli.
-        if tris > spec["max_tris"]:
-            tris = decimate_to(obj, int(spec["max_tris"] * DECIMATE_TARGET_FRACTION))
-        print("radial symmetry: %d sectors, %d verts welded, %d tris"
-              % (RADIAL_SECTORS, seam_verts, tris), flush=True)
+        seam_verts, _ = radial_symmetrize(source)
+        print("radial symmetry: %d sectors, %d verts welded"
+              % (RADIAL_SECTORS, seam_verts), flush=True)
+    source.name = "HandleSource"
+    obj = duplicate(source, "Handle")
+    tris, components, floaters_removed = retopo(obj, job.get("backend", ""), spec["max_tris"])
     uv_ok = ensure_uv(obj)
     tex_path = os.path.join(out_dir, "model_tex.png")
-    bake_texture(obj, tex_path)
+    bake_texture(source, obj, tex_path)
+    # Zdroj uz neni potreba a do FBX nesmi (use_selection=False bere vse).
+    bpy.data.objects.remove(source, do_unlink=True)
+    activate(obj)
     # bbox_studs je strop, ne cil - skaluje se na target_studs (viz _notes2
     # ve spec/roblox_spec.json). Job smi poslat vlastni a prebit kategorii.
     target = job.get("target_studs") or spec.get("target_studs") or spec["bbox_studs"]
