@@ -1,0 +1,313 @@
+"""Uklizene GLB -> rigovane FBX s Mixamo kostrou, bez neuronky.
+
+    blender -b -P fc_rig_template.py -- --job /data/jobs/<id>.json
+
+Job JSON: {"id", "glb": clean.glb, "out_dir"}
+
+Proc sablona misto auto-rigu: ani UniRig, ani MIA na GB10 nerozbehneme.
+UniRig stoji na `cumm`, ktery nezna CUDA arch 12.1 (nezna ji ani nejnovejsi
+verze, konci na 12.0). MIA potrebuje `bpy`, ktery pro linux aarch64 nema
+wheel, a vola Blender uz pri importu. Mereno 2026-08-31, viz sekce 12 planu.
+
+Tenhle skript proto kostru neodhaduje siti, ale staví ji z proporci meshe a
+vahy necha spocitat Blenderu (ARMATURE_AUTO, heat map). Kosti maji Mixamo
+jmena, takze `fc_retarget.py` na vysledek sedne beze zmeny a klipy z knihovny
+se na nej nasadi stejne jako na rig z neuronky.
+
+Omezeni, ktere je poctive rict dopredu: sablona predpoklada humanoida stojiciho
+zpredma. U ctyrnozcu, kridel a ocasu vyjde nesmysl - proto ma report pole
+`fit_warnings`, at to pipeline poznaji driv nez uzivatel.
+"""
+import argparse
+import json
+import math
+import os
+import sys
+
+import bpy
+from mathutils import Vector
+
+MIXAMO = "mixamorig:"
+
+# Vyskove pomery kostry vuci vysce postavy. Cisla jsou z Mixamo mannequina
+# (zmereno na 1.8 m figure), ne vycucana: hips 0.53 je presne to, co dela
+# rozdil mezi "stoji" a "sedi v pulce stehen".
+RATIOS = {
+    "hips": 0.530,
+    "spine": 0.585,
+    "spine1": 0.640,
+    "spine2": 0.700,
+    "neck": 0.800,
+    "head": 0.855,
+    "headtop": 0.975,
+    "shoulder": 0.790,
+    "knee": 0.270,
+    "ankle": 0.045,
+    "toe": 0.015,
+}
+
+
+def parse_args():
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--job", required=True)
+    return ap.parse_args(argv)
+
+
+def reset_scene():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+
+
+def import_glb(path):
+    bpy.ops.import_scene.gltf(filepath=path)
+    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+    if not meshes:
+        raise RuntimeError("GLB obsahuje 0 meshu")
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in meshes:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
+    obj.name = "Character"
+    return obj
+
+
+def world_verts(obj):
+    m = obj.matrix_world
+    return [m @ v.co for v in obj.data.vertices]
+
+
+def slice_extent(verts, z, band):
+    """Sirka a hloubka meshe v pasu kolem vysky z. Kdyz v pasu nic neni,
+    vraci None - volajici si pak pomuze bboxem."""
+    xs = [v.x for v in verts if abs(v.z - z) <= band]
+    ys = [v.y for v in verts if abs(v.z - z) <= band]
+    if len(xs) < 3:
+        return None
+    return (min(xs), max(xs), min(ys), max(ys))
+
+
+def leg_split(verts, z, band, x_center):
+    """Najde stred leve a prave nohy v dane vysce. Mezera mezi nohama se hleda
+    jako nejsirsi prazdne misto kolem osy - u postavy s nohama u sebe zadna
+    neni a fallback je ctvrtina sirky."""
+    xs = sorted(v.x for v in verts if abs(v.z - z) <= band)
+    if len(xs) < 6:
+        return None
+    left = [x for x in xs if x > x_center]
+    right = [x for x in xs if x < x_center]
+    if not left or not right:
+        return None
+    return (sum(right) / len(right), sum(left) / len(left))
+
+
+def measure(obj):
+    """Z meshe vytahne rozmery, ze kterych se staví kostra."""
+    verts = world_verts(obj)
+    zs = [v.z for v in verts]
+    xs = [v.x for v in verts]
+    ys = [v.y for v in verts]
+    z0, z1 = min(zs), max(zs)
+    height = z1 - z0
+    if height <= 0:
+        raise RuntimeError("degenerovany mesh (nulova vyska)")
+    band = height * 0.02
+    x_center = (min(xs) + max(xs)) / 2
+    y_center = (min(ys) + max(ys)) / 2
+
+    warnings = []
+    m = {"height": height, "z0": z0, "x_center": x_center, "y_center": y_center}
+
+    sh = slice_extent(verts, z0 + height * RATIOS["shoulder"], band * 2)
+    if sh is None:
+        warnings.append("v urovni ramen neni mesh; sirka odhadnuta z bboxu")
+        half = (max(xs) - min(xs)) / 2
+        m["shoulder_x"] = half * 0.45
+    else:
+        m["shoulder_x"] = (sh[1] - sh[0]) / 2 * 0.82
+
+    hips = slice_extent(verts, z0 + height * RATIOS["hips"], band * 2)
+    m["hip_x"] = ((hips[1] - hips[0]) / 2 * 0.45) if hips else m["shoulder_x"] * 0.6
+
+    legs = leg_split(verts, z0 + height * RATIOS["knee"], band * 2, x_center)
+    if legs is None:
+        warnings.append("nohy se nepodarilo rozeznat; pouzita polovina sirky boku")
+        m["leg_x"] = m["hip_x"]
+    else:
+        m["leg_x"] = (abs(legs[0] - x_center) + abs(legs[1] - x_center)) / 2
+
+    # Ruka: od ramene ven. Sirka v urovni ramen zahrnuje i pripadne ruce podel
+    # tela, takze delka paze se odvozuje z vysky, ne ze sirky - je stabilnejsi.
+    m["arm_len"] = height * 0.155
+    m["forearm_len"] = height * 0.145
+    m["hand_len"] = height * 0.045
+
+    ratio = (max(xs) - min(xs)) / height if height else 0
+    if ratio > 1.2:
+        warnings.append(f"mesh je sirsi nez vyssi (pomer {ratio:.2f}) - humanoid?")
+    m["warnings"] = warnings
+    return m
+
+
+def bone_chain(m):
+    """(jmeno, head, tail, rodic) pro celou kostru. Jmena jsou Mixamo, protoze
+    na ne sedaji klipy z knihovny i fc_retarget.py."""
+    h, z0 = m["height"], m["z0"]
+    cx, cy = m["x_center"], m["y_center"]
+    sx, lx = m["shoulder_x"], m["leg_x"]
+
+    def z(key):
+        return z0 + h * RATIOS[key]
+
+    chain = [
+        ("Hips", (cx, cy, z("hips")), (cx, cy, z("spine")), None),
+        ("Spine", (cx, cy, z("spine")), (cx, cy, z("spine1")), "Hips"),
+        ("Spine1", (cx, cy, z("spine1")), (cx, cy, z("spine2")), "Spine"),
+        ("Spine2", (cx, cy, z("spine2")), (cx, cy, z("neck")), "Spine1"),
+        ("Neck", (cx, cy, z("neck")), (cx, cy, z("head")), "Spine2"),
+        ("Head", (cx, cy, z("head")), (cx, cy, z("headtop")), "Neck"),
+    ]
+    for side, sign in (("Left", 1.0), ("Right", -1.0)):
+        sh_x = cx + sign * sx
+        chain += [
+            (f"{side}Shoulder", (cx + sign * sx * 0.25, cy, z("shoulder")),
+             (sh_x, cy, z("shoulder")), "Spine2"),
+            (f"{side}Arm", (sh_x, cy, z("shoulder")),
+             (sh_x + sign * m["arm_len"], cy, z("shoulder")), f"{side}Shoulder"),
+            (f"{side}ForeArm", (sh_x + sign * m["arm_len"], cy, z("shoulder")),
+             (sh_x + sign * (m["arm_len"] + m["forearm_len"]), cy, z("shoulder")),
+             f"{side}Arm"),
+            (f"{side}Hand", (sh_x + sign * (m["arm_len"] + m["forearm_len"]), cy, z("shoulder")),
+             (sh_x + sign * (m["arm_len"] + m["forearm_len"] + m["hand_len"]), cy, z("shoulder")),
+             f"{side}ForeArm"),
+            (f"{side}UpLeg", (cx + sign * lx, cy, z("hips")),
+             (cx + sign * lx, cy, z("knee")), "Hips"),
+            (f"{side}Leg", (cx + sign * lx, cy, z("knee")),
+             (cx + sign * lx, cy, z("ankle")), f"{side}UpLeg"),
+            (f"{side}Foot", (cx + sign * lx, cy, z("ankle")),
+             (cx + sign * lx, cy - h * 0.06, z("toe")), f"{side}Leg"),
+            (f"{side}ToeBase", (cx + sign * lx, cy - h * 0.06, z("toe")),
+             (cx + sign * lx, cy - h * 0.10, z("toe")), f"{side}Foot"),
+        ]
+    return chain
+
+
+def build_armature(m):
+    bpy.ops.object.armature_add(enter_editmode=True, location=(0, 0, 0))
+    arm = bpy.context.object
+    arm.name = "Armature"
+    eb = arm.data.edit_bones
+    for b in list(eb):
+        eb.remove(b)
+    for name, head, tail, parent in bone_chain(m):
+        bone = eb.new(MIXAMO + name)
+        bone.head, bone.tail = Vector(head), Vector(tail)
+        if parent:
+            bone.parent = eb[MIXAMO + parent]
+        bone.use_connect = False
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return arm
+
+
+def weighted_verts(mesh):
+    return sum(1 for v in mesh.data.vertices
+               if any(g.weight > 0.0001 for g in v.groups))
+
+
+def _parent(mesh, arm, kind):
+    bpy.ops.object.select_all(action="DESELECT")
+    mesh.select_set(True)
+    arm.select_set(True)
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.parent_set(type=kind)
+
+
+def bind(mesh, arm):
+    """Heat map vahy, s obalkou jako zachranou.
+
+    Heat weighting umi selhat TISE: vytvori vertex groups i modifikator, ale
+    nechá je prazdne - stane se to u meshe slozeneho z odpojenych kusu.
+    Vyjimka pritom nepadne, takze se to musi poznat spocitanim vah. Zmereno
+    na testovaci figure z devíti kvadru: 22 skupin, 0 vah, zadna chyba."""
+    _parent(mesh, arm, "ARMATURE_AUTO")
+    if weighted_verts(mesh) > 0:
+        return "heat"
+    print("heat map nechala vahy prazdne, zkousim obalku", flush=True)
+    for vg in list(mesh.vertex_groups):
+        mesh.vertex_groups.remove(vg)
+    for md in [m for m in mesh.modifiers if m.type == "ARMATURE"]:
+        mesh.modifiers.remove(md)
+    mesh.parent = None
+    _parent(mesh, arm, "ARMATURE_ENVELOPE")
+    return "envelope" if weighted_verts(mesh) > 0 else "none"
+
+
+def max_influences(mesh):
+    worst = 0
+    for v in mesh.data.vertices:
+        worst = max(worst, sum(1 for g in v.groups if g.weight > 0.0001))
+    return worst
+
+
+def unweighted_verts(mesh):
+    """Vrcholy bez jedine vahy zustanou pri animaci stat na miste - je to
+    nejviditelnejsi projev spatne sedici sablony, tak se pocitaji."""
+    return len(mesh.data.vertices) - weighted_verts(mesh)
+
+
+def export_fbx(path):
+    bpy.ops.export_scene.fbx(
+        filepath=path,
+        use_selection=False,
+        add_leaf_bones=False,
+        bake_anim=False,
+        path_mode="COPY",
+        embed_textures=False,
+    )
+
+
+def main():
+    args = parse_args()
+    with open(args.job) as f:
+        job = json.load(f)
+    out_dir = job["out_dir"]
+    os.makedirs(out_dir, exist_ok=True)
+
+    reset_scene()
+    mesh = import_glb(job["glb"])
+    m = measure(mesh)
+    arm = build_armature(m)
+    method = bind(mesh, arm)
+
+    unweighted = unweighted_verts(mesh)
+    if method == "none":
+        raise RuntimeError("ani heat map, ani obalka nepridelily vahy - "
+                           "mesh na humanoidni sablonu nesedi")
+    fbx = os.path.join(out_dir, "rigged.fbx")
+    export_fbx(fbx)
+
+    report = {
+        "fbx": os.path.basename(fbx),
+        "bones": len(arm.data.bones),
+        "weights": method,
+        "max_influences": max_influences(mesh),
+        "unweighted_verts": unweighted,
+        "vert_count": len(mesh.data.vertices),
+        "height_m": round(m["height"], 4),
+        "shoulder_half_width": round(m["shoulder_x"], 4),
+        "leg_half_width": round(m["leg_x"], 4),
+        "fit_warnings": m["warnings"],
+    }
+    with open(os.path.join(out_dir, "rig_report.json"), "w") as f:
+        json.dump(report, f, indent=2)
+    print("FC_RIG_OK", json.dumps(report))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"FC_RIG_FAIL {e}", file=sys.stderr)
+        sys.exit(1)

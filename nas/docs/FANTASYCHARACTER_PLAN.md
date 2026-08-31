@@ -306,3 +306,68 @@ GLB + platná `anim_ranges.lua`.
 Neověřené zůstávají ComfyUI kroky (`preprocess`, `mesh`, `rig`) — ty potřebují
 workflow z fáze 1 — a chování na skutečném Mixamo FBX, protože fixture je
 sedmikostrová náhražka, ne `mixamorig` s 65 kostmi.
+
+## 12. Auto-rig na GB10: proč V1 jede na šabloně (měřeno 2026-08-31)
+
+Plán počítal s auto-rigem z neuronky — §4.2 vybírá pro V1 **MIA** s
+odůvodněním, že *„MIA cesta nepotřebuje spconv ani flash-attn"*. Obě cesty
+jsem na Sparku zkusil dotáhnout a **ani jedna se rozběhnout nedá**, každá
+z jiného důvodu.
+
+### Co funguje
+
+Stroj CUDA rozšíření překládat umí, to není problém:
+
+| | výsledek |
+|---|---|
+| `nvcc` | 13.0.88, je na stroji (jen mimo PATH, `CUDA_HOME` nenastavené) |
+| `torch-scatter` | přeloženo **s CUDA kernely**, `scatter_add` ověřen během na GPU |
+| `torch-cluster` | přeloženo **s CUDA kernely**, `knn_graph` ověřen během na GPU |
+| `pytorch3d 0.7.8` | přeloženo (`PYTORCH3D_FORCE_NO_CUDA=1`), transformace ověřeny na GPU |
+
+Spark je `aarch64`, torch 2.11.0+cu130, compute capability **(12, 1)** —
+plán hádal `TORCH_CUDA_ARCH_LIST="12.1"` správně.
+
+### A (UniRig): `cumm` nezná Blackwell
+
+Node `PozzettiAndrea/ComfyUI-UniRig`, který plán jmenuje, **nemá MIA režim** —
+je to čistý UniRig a `nodes/unirig/ptv3_encoder.py` importuje `spconv.pytorch`
+a `torch_scatter` napřímo. Spconv tedy není volitelný, jak §4.2 předpokládá.
+
+Build padá na `ValueError: Unknown CUDA arch (12.1) or GPU not supported`
+z `cumm/common.py`. Ten seznam je natvrdo v kódu: verze `0.7.13`, kterou si
+spconv pinuje, končí na `9.0`; nejnovější přidává `10.0` a `12.0`, ale
+**`12.1` tam pořád není**. Bez CUDA se spconv přeloží, ale za běhu hlásí
+*„not implemented for CPU ONLY build"*.
+
+### B (MIA): `bpy` nemá wheel pro linux aarch64
+
+`bpy` nemá aarch64 wheel pro Linux v žádné verzi — ani pinovaná 4.3.0, ani
+nejnovější 5.2.1. (Pozor na `arm64` soubory na PyPI, to jsou macOS.) A MIA
+Blender volá **už při importu**: `model.py` → `util.dataset_mixamo` →
+`get_kinematic_tree()`, které na úrovni modulu dělá `blender_utils.load_file()`
+nad `data/Mixamo/bones.fbx` — souborem, který **v publikovaném HF repu není**.
+
+### C: šablona, na kterou sedí stejné klipy
+
+`fc_rig_template.py` kostru neodhaduje sítí, ale staví ji z proporcí meshe
+(řezy po výšce → šířka ramen, rozestup nohou) a váhy nechá spočítat Blenderu.
+Kosti mají Mixamo jména, takže `fc_retarget.py` i knihovna klipů fungují beze
+změny.
+
+Ověřeno na JODA (Blender 4.2.9) celým řetězem mesh → rig → retarget → export:
+22 kostí, heat map váhy, 7 % vrcholů bez váhy, `bones_missing_in_target: {}`
+a výsledné GLB nese oba klipy pod jejich jmény se skinem o 23 kloubech.
+
+Past, kterou to odhalilo: **heat weighting umí selhat tiše** — vytvoří vertex
+groups i modifikátor, nechá je prázdné a nevyhodí výjimku. Pozná se to jedině
+spočítáním vah, což `bind()` dělá, a padá pak na obálku.
+
+Omezení: šablona předpokládá humanoida stojícího zpředma. Report má
+`fit_warnings` a worker loguje, když zůstane přes 25 % vrcholů bez váhy.
+
+### Až Blackwell doplní
+
+Na stroji leží připravené: UniRig node jako `custom_nodes/ComfyUI-UniRig.disabled`
+(nenačte se) i s váhami v `models/unirig/` (2,8 GB), a MIA v `~/Code/Make-It-Animatable`
+s checkpointy (2,2 GB). Přepnout zpět jde přes `FC_RIG=comfy`.

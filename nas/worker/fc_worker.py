@@ -32,6 +32,10 @@ COMFY_TIMEOUT = int(os.environ.get("FC_COMFY_TIMEOUT", "1800"))
 # na 48 snimku (Cycles CPU, GPU tu neni), takze by drzel workera kvuli videu,
 # ktere je jen pohodli. Na 'full' prepnout, az bude render na Sparku.
 PREVIEW_MODE = os.environ.get("FC_PREVIEW", "thumb")
+# template | comfy. Vychozi je sablona v Blenderu na JODA, protoze ani UniRig,
+# ani MIA na GB10 nerozbehneme (viz FANTASYCHARACTER_PLAN.md 12). Na 'comfy'
+# se prepne, az nekdo z tech upstreamu Blackwell doplni.
+RIG_MODE = os.environ.get("FC_RIG", "template")
 
 # Kazdy ComfyUI krok ma vlastni workflow; fc_pipeline.json je fallback pro
 # pripad, ze fáze 1 skonci s jednim velkym grafem misto tri.
@@ -266,9 +270,25 @@ def step_clean(claim):
 
 def step_rig(claim):
     d, files = claim["dir"], claim["files"]
-    out = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"])), ".fbx"),
-                      os.path.join(d, files["rigged_fbx"]))
-    return {"artifacts": {"rigged_fbx": out}}
+    if RIG_MODE == "comfy":
+        out = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"])), ".fbx"),
+                          os.path.join(d, files["rigged_fbx"]))
+        return {"artifacts": {"rigged_fbx": out}}
+
+    report = run_blender("fc_rig_template.py", {
+        "id": claim["character"]["id"],
+        "glb": os.path.join(d, files["clean_glb"]),
+        "out_dir": d,
+    })
+    # Sablona predpoklada humanoida; kdyz mesh nesedi, rig vznikne, ale bude
+    # divny. Varovani patri do logu, at se to pozna driv nez na modelu.
+    for w in report.get("fit_warnings", []):
+        print(f"  rig varovani: {w}", flush=True)
+    if report.get("unweighted_verts") and report.get("vert_count"):
+        pct = 100.0 * report["unweighted_verts"] / report["vert_count"]
+        if pct > 25:
+            print(f"  rig varovani: {pct:.0f} % vrcholu bez vahy", flush=True)
+    return {"artifacts": {"rigged_fbx": os.path.join(d, files["rigged_fbx"])}}
 
 
 def step_animate(claim):
