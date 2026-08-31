@@ -9,6 +9,7 @@ Kroky na Sparku (preprocess, mesh, rig) jedou pres ComfyUI /prompt; kroky na
 JODA (clean, animate, export, packy) pres headless Blender.
 """
 import json
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 API = os.environ.get("UGC_API", "http://ugc-api:8095")
 DATA = os.environ.get("UGC_DATA", "/data")
@@ -117,14 +119,49 @@ def comfy_get(path):
         return json.load(resp)
 
 
+def comfy_upload(path):
+    """Nahraje soubor do input slozky ComfyUI a vrati jmeno, kterym se na nej
+    workflow odkaze.
+
+    ComfyUI bezi na Sparku, ale soubory kroku lezi na /data JODA a mezi stroji
+    zadny sdileny mount neni - predat nodu absolutni cestu tedy nemuze vyjit.
+    Stejnou cestou jde uz ugc-pipeline (Comfy.UploadImage v spark/internal/ugc).
+
+    Jmeno je unikatni: ComfyUI si input slozku sdili se vsemi behy, takze
+    'source.png' by si dva soubehy jobu prepsaly pod rukama."""
+    name = "fc_%s_%s" % (uuid.uuid4().hex[:12], os.path.basename(path))
+    boundary = "----fcworker%s" % uuid.uuid4().hex
+    ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    with open(path, "rb") as f:
+        payload = f.read()
+    body = b"".join([
+        ("--%s\r\n" % boundary).encode(),
+        ('Content-Disposition: form-data; name="image"; filename="%s"\r\n' % name).encode(),
+        ("Content-Type: %s\r\n\r\n" % ctype).encode(),
+        payload, b"\r\n",
+        ("--%s\r\n" % boundary).encode(),
+        b'Content-Disposition: form-data; name="overwrite"\r\n\r\ntrue\r\n',
+        ("--%s--\r\n" % boundary).encode(),
+    ])
+    req = urllib.request.Request(
+        COMFY + "/upload/image", data=body,
+        headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        out = json.load(resp)
+    sub = out.get("subfolder") or ""
+    return "%s/%s" % (sub, out["name"]) if sub else out["name"]
+
+
 def comfy_run(step, image_path):
     """Posle workflow a pocka na vysledek. Vraci seznam (filename, subfolder,
     type) vsech vystupu, ktere ComfyUI zapsal."""
     if not COMFY:
         raise RuntimeError(f"{step}: FC_COMFY_URL neni nastavene")
     workflow, name = load_workflow(step)
-    if image_path and not set_titled_input(workflow, TITLE_INPUT_IMAGE, "image", image_path):
-        raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
+    if image_path:
+        uploaded = comfy_upload(image_path)
+        if not set_titled_input(workflow, TITLE_INPUT_IMAGE, "image", uploaded):
+            raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
 
     prompt_id = comfy_post("/prompt", {"prompt": workflow})["prompt_id"]
     deadline = time.time() + COMFY_TIMEOUT
@@ -136,9 +173,34 @@ def comfy_run(step, image_path):
             if status.get("status_str") == "error":
                 raise RuntimeError(f"{step}: ComfyUI hlasi chybu, prompt {prompt_id}")
             if status.get("completed") or entry.get("outputs"):
-                return collect_outputs(entry.get("outputs", {}))
+                return collect_outputs(entry.get("outputs", {})) + prefix_candidates(workflow)
         time.sleep(3)
     raise RuntimeError(f"{step}: ComfyUI nedobehl do {COMFY_TIMEOUT}s (prompt {prompt_id})")
+
+
+def prefix_candidates(workflow):
+    """Cesty odhadnute z filename_prefix, pro nody, ktere o sobe nedaji vedet.
+
+    Do history/outputs zapise ComfyUI jen to, co nod vrati pod klicem "ui".
+    Trellis2ExportMesh vraci prostou dvojici cest, takze po nem v outputs
+    nezustane nic a krok by spadl na "nevratil zadny soubor". Stejnou past uz
+    obchazi ugc-pipeline (meshFile v spark/internal/ugc/pipeline.go).
+
+    Pouziva se az jako doplnek za skutecne vystupy, takze kdyz nod hlasi
+    soubor sam, ma prednost."""
+    out = []
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        prefix = (node.get("inputs") or {}).get("filename_prefix")
+        if not isinstance(prefix, str) or not prefix:
+            continue
+        subfolder, _, base = prefix.rpartition("/")
+        fmt = (node.get("inputs") or {}).get("file_format")
+        exts = [fmt] if isinstance(fmt, str) and fmt else ["glb", "fbx", "png"]
+        for ext in exts:
+            out.append((f"{base}_00001_.{ext}", subfolder, "output"))
+    return out
 
 
 def collect_outputs(outputs):

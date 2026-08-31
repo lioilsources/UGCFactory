@@ -110,5 +110,97 @@ class TestLoadRanges(unittest.TestCase):
         self.assertEqual(fc_worker.load_ranges(tempfile.mkdtemp()), {})
 
 
+class TestComfyUpload(unittest.TestCase):
+    """Soubory kroku lezi na /data JODA, ComfyUI bezi na Sparku a sdileny
+    mount mezi nimi neni - workflow proto musi dostat jmeno nahraneho souboru,
+    nikdy ne absolutni cestu."""
+
+    def test_uploads_and_uses_returned_name(self):
+        sent = {}
+
+        def fake_urlopen(req, *a, **kw):
+            sent["url"] = req.full_url
+            sent["ctype"] = req.headers.get("Content-type", "")
+            sent["body"] = req.data
+
+            class Resp:
+                def read(self_inner):
+                    return b'{"name": "fc_abc_source.png", "subfolder": "", "type": "input"}'
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return False
+
+            return Resp()
+
+        with tempfile.TemporaryDirectory() as d:
+            src_path = os.path.join(d, "source.png")
+            with open(src_path, "wb") as f:
+                f.write(b"\x89PNG_fake")
+            orig_open, orig_comfy = fc_worker.urllib.request.urlopen, fc_worker.COMFY
+            fc_worker.urllib.request.urlopen = fake_urlopen
+            fc_worker.COMFY = "http://spark:8188"
+            try:
+                name = fc_worker.comfy_upload(src_path)
+            finally:
+                fc_worker.urllib.request.urlopen = orig_open
+                fc_worker.COMFY = orig_comfy
+
+        self.assertEqual(name, "fc_abc_source.png")
+        self.assertEqual(sent["url"], "http://spark:8188/upload/image")
+        self.assertIn("multipart/form-data", sent["ctype"])
+        self.assertIn(b"\x89PNG_fake", sent["body"])
+        # Jmeno v ComfyUI musi byt unikatni, jinak si soubezne joby prepisou vstup.
+        self.assertNotIn(b'filename="source.png"', sent["body"])
+
+    def test_subfolder_is_part_of_the_name(self):
+        def fake_urlopen(req, *a, **kw):
+            class Resp:
+                def read(self_inner):
+                    return b'{"name": "x.png", "subfolder": "fc", "type": "input"}'
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return False
+
+            return Resp()
+
+        with tempfile.TemporaryDirectory() as d:
+            src_path = os.path.join(d, "x.png")
+            with open(src_path, "wb") as f:
+                f.write(b"x")
+            orig_open, orig_comfy = fc_worker.urllib.request.urlopen, fc_worker.COMFY
+            fc_worker.urllib.request.urlopen = fake_urlopen
+            fc_worker.COMFY = "http://spark:8188"
+            try:
+                self.assertEqual(fc_worker.comfy_upload(src_path), "fc/x.png")
+            finally:
+                fc_worker.urllib.request.urlopen = orig_open
+                fc_worker.COMFY = orig_comfy
+
+
+class TestPrefixCandidates(unittest.TestCase):
+    """Trellis2ExportMesh nezapise do history nic, takze se soubor musi
+    odhadnout z filename_prefix - jinak by krok mesh spadl vzdycky."""
+
+    def test_derives_path_from_prefix_and_format(self):
+        wf = {"10": {"class_type": "Trellis2ExportMesh",
+                     "inputs": {"filename_prefix": "3D/fc_mesh", "file_format": "glb"}}}
+        self.assertEqual(fc_worker.prefix_candidates(wf),
+                         [("fc_mesh_00001_.glb", "3D", "output")])
+
+    def test_prefix_without_subfolder(self):
+        wf = {"3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "apose"}}}
+        self.assertIn(("apose_00001_.png", "", "output"), fc_worker.prefix_candidates(wf))
+
+    def test_ignores_nodes_without_prefix(self):
+        wf = {"1": {"class_type": "LoadImage", "inputs": {"image": "x.png"}}}
+        self.assertEqual(fc_worker.prefix_candidates(wf), [])
+
+
 if __name__ == "__main__":
     unittest.main()
