@@ -29,6 +29,15 @@ DECIMATE_TARGET_FRACTION = 0.9   # rezerva na triangulaci, stejne jako convert.p
 VOXEL_ADAPTIVE_FRACTION = 0.008
 
 
+# Bake projekci zdroj -> cil. Kratsi paprsek nez u convert.py: postava ma
+# vrstvy blizko sebe (plast pres brneni), a kdyz paprsek dolete dal nez je
+# tloustka vrstvy, prolete plastem a vezme barvu tela za nim - v plasti pak
+# jsou bile smouhy z brneni (zmereno 2026-08-31: pri 15 % vysky smouhy, pri
+# 1,5 % ciste). Zvetsovani klece s tim nepohnulo, protoze slo o dolet.
+CAGE_EXTRUSION_FRACTION = 0.004
+RAY_DISTANCE_FRACTION = 0.015
+
+
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     ap = argparse.ArgumentParser()
@@ -54,6 +63,21 @@ def import_glb(path):
     obj = bpy.context.view_layer.objects.active
     obj.name = "Character"
     return obj
+
+
+def activate(obj):
+    """Jediny vybrany a aktivni objekt - bpy.ops se na to spolehaji."""
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def duplicate(obj, name):
+    dup = obj.copy()
+    dup.data = obj.data.copy()
+    dup.name = name
+    bpy.context.scene.collection.objects.link(dup)
+    return dup
 
 
 def cleanup(obj):
@@ -111,24 +135,35 @@ def decimate_to(obj, max_tris):
 
 
 def ensure_uv(obj):
+    """Decimate i voxel remesh UV rozbijou (remesh je zahodi uplne), takze cil
+    dostane cerstvy smart_project. Zdrojovy atlas se pres nej necte - textura
+    se projektuje z originalu (bake_atlas)."""
     if obj.data.uv_layers:
         return True
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(island_margin=0.02)
+    # island_margin je v UV jednotkach, ne v procentech ostrůvku: 0.02 znamena
+    # 2 % atlasu kolem KAZDEHO ostrova. Voxel remesh vyrobi mesh bez souvislych
+    # ploch, takze smart_project nareze tisice ostrůvku - pri 0.02 pak margin
+    # sezral skoro cely atlas a z postavy zbyly tecky na cerne (2026-08-31).
+    bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.001)
     bpy.ops.object.mode_set(mode="OBJECT")
     return bool(obj.data.uv_layers)
 
 
-def bake_atlas(obj, out_png, size):
-    """Vsechny materialy do jedne textury pres EMIT bake (bez svetel, na CPU
-    rychle) - Roblox chce 1 material na MeshPart a Luanti jednu texturu."""
+def bake_atlas(source, target, out_png, size):
+    """Vsechny materialy do jedne textury projekci zdroj -> cil (EMIT bake,
+    Selected-to-Active) - Roblox chce 1 material na MeshPart a Luanti jednu
+    texturu.
+
+    Drive se peklo primo na decimovanem meshi pres jeho vlastni UV. Decimace
+    z 30k na par tisic trojuhelniku ale UV ostrovy rozlame (a remesh je zahodi
+    uplne), takze bake cetl puvodni TRELLIS atlas pres cizi souradnice a z
+    rytire vysly konfety - overeno 2026-08-31 srovnanim mesh.glb (cisty) a
+    clean.glb (rozsypany). Stejna past a stejna oprava jako v convert.py."""
     img = bpy.data.images.new("fc_atlas", size, size, alpha=True)
-    if not obj.data.materials:
-        mat = bpy.data.materials.new("Character")
-        mat.use_nodes = True
-        obj.data.materials.append(mat)
-    for mat in obj.data.materials:
+
+    for mat in source.data.materials:
         if mat is None or not mat.use_nodes:
             continue
         nt = mat.node_tree
@@ -142,37 +177,36 @@ def bake_atlas(obj, out_png, size):
             else:
                 emit.inputs["Color"].default_value = base.default_value
         nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.image = img
-        nt.nodes.active = tex
 
+    mat = bpy.data.materials.new("Character")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    nt.nodes.active = tex
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf:
+        nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    target.data.materials.clear()
+    target.data.materials.append(mat)
+
+    size_m = max(source.dimensions)
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.cycles.samples = 4
-    scene.render.bake.margin = 4
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.bake(type="EMIT")
+    # Drobne ostrovy potrebuji siroky prelev, jinak mezi nimi prosvita cerna.
+    scene.render.bake.margin = 8
+    activate(target)
+    source.select_set(True)
+    bpy.ops.object.bake(
+        type="EMIT", use_selected_to_active=True, use_cage=False,
+        cage_extrusion=size_m * CAGE_EXTRUSION_FRACTION,
+        max_ray_distance=size_m * RAY_DISTANCE_FRACTION)
     img.filepath_raw = out_png
     img.file_format = "PNG"
     img.save()
     return img
-
-
-def use_atlas_only(obj, img):
-    """Po bake nahradit materialy jednim, ktery cte atlas. Bez toho by
-    glTF exporter vytahl puvodni TRELLIS textury a atlas by byl k nicemu."""
-    obj.data.materials.clear()
-    mat = bpy.data.materials.new("Character")
-    mat.use_nodes = True
-    nt = mat.node_tree
-    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-    tex = nt.nodes.new("ShaderNodeTexImage")
-    tex.image = img
-    nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    obj.data.materials.append(mat)
 
 
 def scale_and_ground(obj, height_m):
@@ -219,15 +253,22 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     reset_scene()
-    obj = import_glb(job["glb"])
-    tris_in = tri_count(obj)
-    cleanup(obj)
+    source = import_glb(job["glb"])
+    tris_in = tri_count(source)
+    cleanup(source)
+    source.name = "CharacterSource"
+    obj = duplicate(source, "Character")
+    # remesh i decimate jedou pres modifier_apply, ktery bere AKTIVNI objekt -
+    # bez tohohle by se pouzily na zdroj a cil zustal neztenceny.
+    activate(obj)
     remeshed = remesh_if_open(obj)
     tris = decimate_to(obj, budget["max_tris"])
     uv_ok = ensure_uv(obj)
     atlas_path = os.path.join(out_dir, "clean_tex.png")
-    img = bake_atlas(obj, atlas_path, budget["bake_size"])
-    use_atlas_only(obj, img)
+    bake_atlas(source, obj, atlas_path, budget["bake_size"])
+    # Zdroj do GLB nesmi - export bere celou scenu.
+    bpy.data.objects.remove(source, do_unlink=True)
+    activate(obj)
     scale_and_ground(obj, TARGET_HEIGHT_M)
     glb_path = os.path.join(out_dir, "clean.glb")
     export_glb(glb_path)
