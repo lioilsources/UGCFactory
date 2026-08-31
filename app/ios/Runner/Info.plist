@@ -83,5 +83,9 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Vyber obrazku postavicky, ze ktere se udela 3D model.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Vyfoceni postavicky, ze ktere se udela 3D model.</string>
 </dict>
 </plist>

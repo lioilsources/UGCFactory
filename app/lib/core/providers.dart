@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
+import 'fc_api.dart';
+import 'fc_models.dart';
 import 'models.dart';
 
 /// Vychozi je tailnet adresa JODA: funguje doma i z mobilnich dat, protoze
@@ -32,11 +34,15 @@ final baseUrlProvider = StateProvider<String>((ref) {
   return ref.watch(prefsProvider).getString('baseUrl') ?? initialBaseUrl;
 });
 
-final cfClientIdProvider = StateProvider<String>((ref) =>
-    ref.watch(prefsProvider).getString('cfClientId') ?? _buildClientId);
+final cfClientIdProvider = StateProvider<String>(
+  (ref) => ref.watch(prefsProvider).getString('cfClientId') ?? _buildClientId,
+);
 
-final cfClientSecretProvider = StateProvider<String>((ref) =>
-    ref.watch(prefsProvider).getString('cfClientSecret') ?? _buildClientSecret);
+final cfClientSecretProvider = StateProvider<String>(
+  (ref) =>
+      ref.watch(prefsProvider).getString('cfClientSecret') ??
+      _buildClientSecret,
+);
 
 final apiProvider = Provider<UgcApi>((ref) {
   return UgcApi(
@@ -46,13 +52,68 @@ final apiProvider = Provider<UgcApi>((ref) {
   );
 });
 
+/// FC scope ma vlastni klic (FC_API_KEYS na serveru). Prazdny znamena, ze
+/// server scope neuzavrel - typicky na LAN.
+const _buildFcKey = String.fromEnvironment('FC_API_KEY');
+
+final fcKeyProvider = StateProvider<String>(
+  (ref) => ref.watch(prefsProvider).getString('fcKey') ?? _buildFcKey,
+);
+
+final fcApiProvider = Provider<FcApi>((ref) {
+  final api = ref.watch(apiProvider);
+  return FcApi(
+    ref.watch(baseUrlProvider),
+    apiKey: ref.watch(fcKeyProvider),
+    accessHeaders: api.authHeaders,
+  );
+});
+
+/// Seznam postav. Stejny duvod pro periodicky refresh jako u jobu: SSE je
+/// hlavni signal, ale kdyz spojeni spadne, appka by jinak ukazovala stara
+/// data donekonecna.
+final fcCharactersProvider = FutureProvider.autoDispose<List<FcCharacter>>((
+  ref,
+) async {
+  final timer = Timer.periodic(
+    const Duration(seconds: 20),
+    (_) => ref.invalidateSelf(),
+  );
+  ref.onDispose(timer.cancel);
+  return ref.watch(fcApiProvider).characters();
+});
+
+/// Detail jedne postavy. Dokud neni hotova, prekresluje se z jejiho SSE
+/// streamu; hotova uz se nemeni, tak se stream nedrzi.
+final fcDetailProvider = StreamProvider.autoDispose.family<FcDetail, String>((
+  ref,
+  id,
+) async* {
+  final api = ref.watch(fcApiProvider);
+  var detail = await api.character(id);
+  yield detail;
+  if (detail.character.isDone) return;
+  await for (final _ in api.events(id)) {
+    detail = await api.character(id);
+    yield detail;
+    if (detail.character.isDone) return;
+  }
+});
+
+final fcAnimationsProvider = FutureProvider.autoDispose<List<FcAnimation>>((
+  ref,
+) async {
+  return ref.watch(fcApiProvider).animations();
+});
+
 /// Zivy seznam jobu. SSE je hlavni signal, ale NESMI byt jediny: kdyz
 /// spojeni spadne (restart ugc-api, uspani telefonu, prepnuti site),
 /// appka by jinak navzdy ukazovala stara data - presne tak zustaly ve
 /// fronte viset FAILy, ktere uz na serveru davno nebyly.
 /// Proto jeste periodicky refresh a refresh pri navratu appky do popredi.
-final jobsProvider =
-    AsyncNotifierProvider<JobsNotifier, List<Job>>(JobsNotifier.new);
+final jobsProvider = AsyncNotifierProvider<JobsNotifier, List<Job>>(
+  JobsNotifier.new,
+);
 
 class JobsNotifier extends AsyncNotifier<List<Job>> {
   @override

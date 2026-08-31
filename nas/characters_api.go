@@ -8,6 +8,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -65,6 +66,7 @@ func (s *Server) routeFC(mux *http.ServeMux) {
 	h("GET /v1/fc/characters/{id}/download", s.handleFCDownload)
 	h("GET /v1/fc/characters/{id}/file/{artifact}", s.handleFCFile)
 	h("GET /v1/fc/characters/{id}/events", s.handleFCEvents)
+	h("GET /v1/fc/characters/{id}/viewer", s.handleFCViewer)
 	h("POST /v1/fc/characters/{id}/export", s.handleFCExport)
 	h("GET /v1/fc/exports/{id}", s.handleFCGetExport)
 	h("GET /v1/fc/animations", s.handleFCListAnimations)
@@ -388,6 +390,65 @@ func (s *Server) handleFCEvents(w http.ResponseWriter, r *http.Request) {
 // one the app's progress stepper listens on.
 func (s *Server) publishCharacter(event string, c *Character) {
 	s.broker.PublishTopic(c.ID, event, c)
+}
+
+// fcViewerHTML is the character's 3D page. Same trick as the job viewer: page,
+// model and script share an origin, which is what makes it work inside the
+// app's WebView on both platforms.
+//
+// Clips are switched from Flutter through window.fcPlay(name) rather than by
+// reloading with a different query — a reload would re-download the GLB every
+// time you tap another animation.
+const fcViewerHTML = `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<script type="module" src="/viewer/assets/model-viewer.min.js"></script>
+<style>
+  html,body{margin:0;height:100%%;background:#14161a;overflow:hidden}
+  model-viewer{width:100%%;height:100%%;--poster-color:#14161a}
+  #err{position:absolute;inset:0;display:none;place-items:center;color:#ff8a80;
+       font:14px -apple-system,system-ui,sans-serif;text-align:center;padding:24px}
+</style></head>
+<body>
+<model-viewer src="%s" alt="%s" camera-controls touch-action="pan-y"
+  environment-image="neutral" exposure="1.4" shadow-intensity="0.6"
+  camera-orbit="200deg 78deg 130%%" min-field-of-view="20deg"
+  interaction-prompt="none" autoplay %s></model-viewer>
+<div id="err"></div>
+<script>
+  const mv = document.querySelector('model-viewer');
+  mv.addEventListener('error', e => {
+    const d = document.getElementById('err');
+    d.style.display = 'grid';
+    d.textContent = 'Model se nepodarilo nacist: ' + (e.detail && e.detail.type || 'chyba');
+  });
+  // Volane z Flutteru pres runJavaScript. Vraci false, kdyz klip v modelu
+  // neni - to je signal, ze retarget a knihovna se rozesly.
+  window.fcPlay = function (name) {
+    if (!mv.availableAnimations.includes(name)) return false;
+    mv.animationName = name;
+    mv.play();
+    return true;
+  };
+  window.fcClips = () => mv.availableAnimations;
+</script>
+</body></html>`
+
+// handleFCViewer serves the standalone 3D page for one character.
+func (s *Server) handleFCViewer(w http.ResponseWriter, r *http.Request) {
+	c := s.characterOr404(w, r.PathValue("id"))
+	if c == nil {
+		return
+	}
+	clip := ""
+	if v := r.URL.Query().Get("clip"); v != "" && validID(v) {
+		clip = fmt.Sprintf("animation-name=%q", v)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, fcViewerHTML,
+		fmt.Sprintf("/v1/fc/characters/%s/file/final_glb", c.ID),
+		html.EscapeString(c.Name), clip)
 }
 
 // --- exports -------------------------------------------------------------
