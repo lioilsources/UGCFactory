@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS items (
 			return err
 		}
 	}
-	return nil
+	return s.migrateCharacters()
 }
 
 const timeFmt = time.RFC3339

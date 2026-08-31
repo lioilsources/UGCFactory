@@ -31,6 +31,7 @@ type Server struct {
 	broker *Broker
 	data   string // /data
 	spark  sparkConfig
+	fcKeys map[string]bool // FC_API_KEYS: vlastni scope pro fantasy_character appku
 }
 
 // sparkConfig is the reroll/generate callback into ImageStudio on Spark.
@@ -43,7 +44,7 @@ type sparkConfig struct {
 func main() {
 	addr := envOr("UGC_ADDR", ":8095")
 	dataDir := envOr("UGC_DATA", "/data")
-	for _, d := range []string{"incoming", "converted", "packed", "rejected", "jobs"} {
+	for _, d := range []string{"incoming", "converted", "packed", "rejected", "jobs", "characters"} {
 		if err := os.MkdirAll(filepath.Join(dataDir, d), 0o755); err != nil {
 			log.Fatal(err)
 		}
@@ -61,6 +62,7 @@ func main() {
 			ClientID:     os.Getenv("SPARK_CF_CLIENT_ID"),
 			ClientSecret: os.Getenv("SPARK_CF_CLIENT_SECRET"),
 		},
+		fcKeys: keySet(os.Getenv("FC_API_KEYS")),
 	}
 
 	mux := http.NewServeMux()
@@ -95,6 +97,11 @@ func main() {
 	// worker-only endpointy: v compose siti neverejne, ven je tunnel nepublikuje
 	mux.HandleFunc("POST /worker/claim", s.handleWorkerClaim)
 	mux.HandleFunc("POST /worker/result/{id}", s.handleWorkerResult)
+	// fantasy characters: vlastni prefix i klice, viz docs/FANTASYCHARACTER_PLAN.md
+	s.routeFC(mux)
+	if len(s.fcKeys) == 0 {
+		log.Print("FC_API_KEYS unset - /v1/fc/ is open (LAN only)")
+	}
 
 	// Dogenerovat nahledy pro joby prijate drive, nez preview existovalo.
 	go backfillPreviews(dataDir)
@@ -126,6 +133,17 @@ func spaHandler(root string) http.Handler {
 		}
 		fs.ServeHTTP(w, r)
 	}))
+}
+
+// keySet parses FC_API_KEYS: comma-separated, empty means the scope is open.
+func keySet(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range strings.Split(raw, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			out[k] = true
+		}
+	}
+	return out
 }
 
 func envOr(k, def string) string {

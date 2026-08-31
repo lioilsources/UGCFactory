@@ -7,23 +7,33 @@ import (
 	"sync"
 )
 
-// Broker fans job/item events out to SSE clients (the Flutter app's queue
-// screen). Slow clients get dropped rather than block the factory.
+// Broker fans job/item/character events out to SSE clients (the studio app's
+// queue screen, the FC app's progress stepper). Slow clients get dropped
+// rather than block the factory.
+//
+// A client either watches everything (the studio) or one topic — a character
+// id — so the phone streaming one generation is not woken by the whole farm.
 type Broker struct {
 	mu      sync.Mutex
-	clients map[chan []byte]struct{}
+	clients map[chan []byte]string // kanal -> topic ("" = vse)
 }
 
-func NewBroker() *Broker { return &Broker{clients: map[chan []byte]struct{}{}} }
+func NewBroker() *Broker { return &Broker{clients: map[chan []byte]string{}} }
 
-func (b *Broker) Publish(event string, payload any) {
+func (b *Broker) Publish(event string, payload any) { b.PublishTopic("", event, payload) }
+
+// PublishTopic reaches the global watchers and the ones on this topic.
+func (b *Broker) PublishTopic(topic, event string, payload any) {
 	data, err := json.Marshal(map[string]any{"event": event, "data": payload})
 	if err != nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for ch := range b.clients {
+	for ch, want := range b.clients {
+		if want != "" && want != topic {
+			continue
+		}
 		select {
 		case ch <- data:
 		default: // klient nestiha - zahodit, at nezablokuje ostatni
@@ -32,6 +42,10 @@ func (b *Broker) Publish(event string, payload any) {
 }
 
 func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	b.ServeTopic(w, r, "")
+}
+
+func (b *Broker) ServeTopic(w http.ResponseWriter, r *http.Request, topic string) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -39,7 +53,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ch := make(chan []byte, 16)
 	b.mu.Lock()
-	b.clients[ch] = struct{}{}
+	b.clients[ch] = topic
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()

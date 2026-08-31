@@ -19,6 +19,8 @@ WORKDIR /app
 COPY blender_scripts/ /app/blender_scripts/
 COPY spec/ /app/spec/
 COPY worker/worker.py /app/worker.py
+COPY worker/fc_worker.py /app/fc_worker.py
+COPY workflows/ /app/workflows/
 
 # blender ma vlastni python; worker loop bezi v systemovem pythonu3
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \

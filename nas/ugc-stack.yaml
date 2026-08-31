@@ -46,6 +46,23 @@ services:
     networks: [ugc]
     depends_on: [ugc-api]
 
+  # fantasy characters: stejny image, jina smycka. Blenderove kroky bezi tady,
+  # ComfyUI kroky (preprocess/mesh/rig) posila na Spark.
+  ugc-fc:
+    image: ugc-blender:latest
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/fc_worker.py"]
+    environment:
+      - UGC_API=http://ugc-api:8095
+      - UGC_DATA=/data
+      - FC_COMFY_URL=${FC_COMFY_URL:-}
+      - FC_WORKFLOW_DIR=/app/workflows
+      - FC_PREVIEW=${FC_PREVIEW:-thumb}
+    volumes:
+      - ${DATA_DIR:?set DATA_DIR in .env}:/data
+    networks: [ugc]
+    depends_on: [ugc-api, ugc-blender]
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: ugc-cloudflared

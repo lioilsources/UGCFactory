@@ -31,6 +31,18 @@ prompt →│ ComfyUI: Illustrious → RMBG → TRELLIS.2    │→ texturovaný
 | `app/` | Flutter appka `ugc_studio` — Composer, fronta, swipe triage (Android, iOS, macOS, web) |
 | `docs/` | smoke test REPORT.md, licence img→3D backendů |
 
+## Fantasy characters
+
+Druhá linka téže továrny: 2D obrázek humanoidní postavičky → texturovaný,
+rigovaný, animovaný 3D model (GLB + FBX) s Mixamo kostrou, odtud do Robloxu
+(MountainsSimulator) a Luanti (DoggioWars). Plán, rozhodnutí a naměřené
+hodnoty jsou v `nas/docs/FANTASYCHARACTER_PLAN.md`, kontrakt API a workerů
+v `nas/README.md`.
+
+Stav: backend (`/v1/fc/`, kroková fronta, SSE) a Blender skripty hotové a
+otestované, ComfyUI workflowy na Sparku (fáze 1) chybí — bez nich kroky
+`preprocess`, `mesh` a `rig` selžou s hláškou, která na to odkazuje.
+
 ## Nasazení
 
 ```bash
