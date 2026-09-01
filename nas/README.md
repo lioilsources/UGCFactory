@@ -74,6 +74,19 @@ char.preprocess  char.mesh  char.clean  char.rig  char.animate  char.export.user
 - `GET /v1/fc/exports/{id}`
 - `GET /v1/fc/animations?category=&tag=&license=`, `PUT /v1/fc/animations/{id}`
 
+**MIA checkpointy musí být na Sparku stažené.** Rig krok bez nich **nespadne** —
+`MIAAutoRig` tiše sklouzne na geometrický fallback a vyrobí model, který projde
+všemi kontrolami, ale při deformaci se trhá do dlouhých hrotů (2026-09-01).
+Poznají se v reportu: `unweighted_verts` výrazně nad nulou a `max_influences`
+kolem 12. Se skutečnými váhami je to 0 a 8.
+
+    ls ~/Code/ComfyUI/models/mia    # bw.pth bw_normal.pth joints.pth
+                                    # joints_coarse.pth pose.pth, celkem 2,2 GB
+
+Stáhnou se samy při prvním běhu z HF `jasongzy/Make-It-Animatable`
+(`output/best/new/`), ale trvá to ~10 minut a mezitím krok doběhne fallbackem.
+Lepší je stáhnout je předem.
+
 Worker (stejný vzor jako `/worker/claim`, soubory po sdíleném `/data`):
 
 - `POST /worker/fc/claim` → `{step_id, step, character, dir, files, clips}`
