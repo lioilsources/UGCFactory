@@ -103,6 +103,35 @@ def leg_split(verts, z, band, x_center):
     return (sum(right) / len(right), sum(left) / len(left))
 
 
+def arm_axis(verts, cx, cy, z0, height, shoulder_x, sign):
+    """Smer, kterym z ramene vede paze, odvozeny z meshe.
+
+    Puvodne sablona vedla paze vodorovne do stran, tedy predpokladala T-pozu.
+    Rytir z pipeline ma ale ruce svesene podel tela: mesh je nejsirsi v urovni
+    boku (0.78 m) a v ramenou jen 0.57 m. Kosti pak vedly prazdnym prostorem
+    vedle hlavy, obalka na ne navazala plast a kus trupu a pri animaci z toho
+    byla placka (videno 2026-09-01).
+
+    Bere vrcholy, ktere lezi bocne za linii ramen, a vraci smer k jejich
+    tezisti. Plast visi vzadu, takze se vrcholy filtruji i podle hloubky.
+    Kdyz jich je malo (skutecna T-poza), vraci None a zustane vodorovna paze.
+    """
+    zlo, zhi = z0 + height * 0.25, z0 + height * 0.86
+    ys = [v.y for v in verts]
+    depth = max(ys) - min(ys)
+    pts = [v for v in verts
+           if zlo <= v.z <= zhi
+           and sign * (v.x - cx) > shoulder_x * 0.75
+           and abs(v.y - cy) <= depth * 0.35]
+    if len(pts) < 20:
+        return None, 0
+    n = len(pts)
+    centroid = Vector((sum(v.x for v in pts) / n,
+                       sum(v.y for v in pts) / n,
+                       sum(v.z for v in pts) / n))
+    return centroid, n
+
+
 def measure(obj):
     """Z meshe vytahne rozmery, ze kterych se staví kostra."""
     verts = world_verts(obj)
@@ -144,6 +173,14 @@ def measure(obj):
     m["forearm_len"] = height * 0.145
     m["hand_len"] = height * 0.045
 
+    for side, sign in (("left", 1.0), ("right", -1.0)):
+        centroid, n = arm_axis(verts, x_center, y_center, z0, height,
+                               m["shoulder_x"], sign)
+        m[f"arm_{side}"] = centroid
+        m[f"arm_{side}_pts"] = n
+    if m["arm_left"] is None and m["arm_right"] is None:
+        warnings.append("paze se z meshe nepodarilo najit; vedeny vodorovne")
+
     ratio = (max(xs) - min(xs)) / height if height else 0
     if ratio > 1.2:
         warnings.append(f"mesh je sirsi nez vyssi (pomer {ratio:.2f}) - humanoid?")
@@ -171,17 +208,29 @@ def bone_chain(m):
     ]
     for side, sign in (("Left", 1.0), ("Right", -1.0)):
         sh_x = cx + sign * sx
+        shoulder = Vector((sh_x, cy, z("shoulder")))
+
+        # Smer paze z meshe; bez nej (T-poza nebo malo dat) vodorovne ven.
+        centroid = m.get(f"arm_{'left' if sign > 0 else 'right'}")
+        if centroid is None:
+            direction = Vector((sign, 0.0, 0.0))
+        else:
+            direction = (centroid - shoulder)
+            direction.y = 0.0            # plast vzadu nesmi paze stahovat dozadu
+            if direction.length < 1e-4:
+                direction = Vector((sign, 0.0, 0.0))
+            else:
+                direction.normalize()
+
+        a1 = shoulder + direction * m["arm_len"]
+        a2 = a1 + direction * m["forearm_len"]
+        a3 = a2 + direction * m["hand_len"]
         chain += [
             (f"{side}Shoulder", (cx + sign * sx * 0.25, cy, z("shoulder")),
-             (sh_x, cy, z("shoulder")), "Spine2"),
-            (f"{side}Arm", (sh_x, cy, z("shoulder")),
-             (sh_x + sign * m["arm_len"], cy, z("shoulder")), f"{side}Shoulder"),
-            (f"{side}ForeArm", (sh_x + sign * m["arm_len"], cy, z("shoulder")),
-             (sh_x + sign * (m["arm_len"] + m["forearm_len"]), cy, z("shoulder")),
-             f"{side}Arm"),
-            (f"{side}Hand", (sh_x + sign * (m["arm_len"] + m["forearm_len"]), cy, z("shoulder")),
-             (sh_x + sign * (m["arm_len"] + m["forearm_len"] + m["hand_len"]), cy, z("shoulder")),
-             f"{side}ForeArm"),
+             tuple(shoulder), "Spine2"),
+            (f"{side}Arm", tuple(shoulder), tuple(a1), f"{side}Shoulder"),
+            (f"{side}ForeArm", tuple(a1), tuple(a2), f"{side}Arm"),
+            (f"{side}Hand", tuple(a2), tuple(a3), f"{side}ForeArm"),
             (f"{side}UpLeg", (cx + sign * lx, cy, z("hips")),
              (cx + sign * lx, cy, z("knee")), "Hips"),
             (f"{side}Leg", (cx + sign * lx, cy, z("knee")),
@@ -326,6 +375,30 @@ def weld_orphans(mesh, arm):
     return fixed
 
 
+def bone_fit(mesh, arm, names):
+    """Prumerna vzdalenost bodu podel kosti k nejblizsimu vrcholu meshe.
+
+    Kdyz kost vede uvnitr koncetiny, je male; kdyz prazdnym prostorem vedle
+    tela, je velke. Presne tim se pozna spatne odhadnuta poza driv, nez to
+    uvidi uzivatel na animaci.
+    """
+    verts = [mesh.matrix_world @ v.co for v in mesh.data.vertices]
+    if not verts:
+        return None
+    total, count = 0.0, 0
+    for name in names:
+        b = arm.data.bones.get(name)
+        if b is None:
+            continue
+        head = arm.matrix_world @ b.head_local
+        tail = arm.matrix_world @ b.tail_local
+        for i in range(1, 5):
+            pt = head.lerp(tail, i / 5.0)
+            total += min((pt - v).length for v in verts)
+            count += 1
+    return round(total / count, 4) if count else None
+
+
 def max_influences(mesh):
     worst = 0
     for v in mesh.data.vertices:
@@ -385,6 +458,9 @@ def main():
         "height_m": round(m["height"], 4),
         "shoulder_half_width": round(m["shoulder_x"], 4),
         "leg_half_width": round(m["leg_x"], 4),
+        "arm_fit": bone_fit(mesh, arm, [MIXAMO + n for n in
+                            ("LeftArm", "LeftForeArm", "RightArm", "RightForeArm")]),
+        "arm_pts": [m.get("arm_left_pts", 0), m.get("arm_right_pts", 0)],
         "fit_warnings": m["warnings"],
     }
     with open(os.path.join(out_dir, "rig_report.json"), "w") as f:
