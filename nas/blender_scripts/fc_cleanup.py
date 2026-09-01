@@ -104,6 +104,27 @@ def tri_count(obj):
     return len(obj.data.loop_triangles)
 
 
+# Plachte staci prekryt dva voxely, aby ji remesh videl jako teleso.
+SOLIDIFY_VOXELS = 2.0
+
+
+def solidify_sheets(obj, thickness):
+    """Da jednostrannym plachtam tloustku.
+
+    TRELLIS vraci povrch, ne teleso: u referencniho rytire bylo 30930 z 60465
+    hran otevrenych, protoze plast je plachta s nulovou tloustkou. Voxel remesh
+    z takove plochy nema co postavit a roztrha ji na cary - plast vysel jako
+    hadry (2026-09-01). Se Solidify ma remesh objem, ktery muze vyplnit.
+
+    offset=0 nechá plachtu rust na obe strany, takze silueta zustane tam, kde
+    byla, a projekce textury po ni pak sedne."""
+    mod = obj.modifiers.new("Solidify", "SOLIDIFY")
+    mod.thickness = thickness
+    mod.offset = 0.0
+    mod.use_rim = True
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+
 def remesh_if_open(obj):
     """Auto-rig (MIA i UniRig) chce uzavrenou skorapku - diry v meshi delaji
     vahy, ktere pri animaci trhaji koncetiny. Remeshujeme jen kdyz je mesh
@@ -111,9 +132,11 @@ def remesh_if_open(obj):
     if open_edges(obj) == 0:
         return False
     dims = obj.dimensions
+    voxel = max(max(dims) * VOXEL_ADAPTIVE_FRACTION, 0.0005)
+    solidify_sheets(obj, voxel * SOLIDIFY_VOXELS)
     mod = obj.modifiers.new("Remesh", "REMESH")
     mod.mode = "VOXEL"
-    mod.voxel_size = max(max(dims) * VOXEL_ADAPTIVE_FRACTION, 0.0005)
+    mod.voxel_size = voxel
     bpy.ops.object.modifier_apply(modifier=mod.name)
     return True
 
@@ -256,6 +279,9 @@ def main():
     source = import_glb(job["glb"])
     tris_in = tri_count(source)
     cleanup(source)
+    # Kolik z toho, co prislo, byly otevrene plochy - rika, jestli je zdroj
+    # teleso, nebo skorapka.
+    open_edges_in = open_edges(source)
     source.name = "CharacterSource"
     obj = duplicate(source, "Character")
     # remesh i decimate jedou pres modifier_apply, ktery bere AKTIVNI objekt -
@@ -278,6 +304,7 @@ def main():
         "tri_count": tris,
         "max_tris": budget["max_tris"],
         "remeshed": remeshed,
+        "open_edges_in": open_edges_in,
         "uv_ok": uv_ok,
         "texture_size": budget["bake_size"],
         "open_edges": open_edges(obj),
