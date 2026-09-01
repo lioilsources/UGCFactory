@@ -31,6 +31,7 @@ import bpy
 
 GAP_FRAMES = 5          # mezera mezi klipy, at posledni snimek nepretece do dalsiho
 MIXAMO_PREFIX = "mixamorig"
+HIPS_BONE = "mixamorig:Hips"   # kost, na ktere Mixamo veze root motion
 
 
 def parse_args():
@@ -125,6 +126,36 @@ def take_action(objs, clip_id, scale):
     return action
 
 
+def strip_root_motion(action, hips):
+    """Udela z klipu animaci na miste: vynuluje translaci boku, rotace nechá.
+
+    Puvodne to odecitalo jen linearni drift, aby zustalo houpani. Nefunguje
+    to: Mixamo klipy jsou zacyklene (prvni a posledni snimek maji stejnou
+    hodnotu), takze zadny drift k odecteni neni, a presto postava lita.
+    Zmereno na Moonwalk + sablonovou kostru: boky se pohybovaly v rozsahu
+    4 m a klesaly 2,5 m pod zem.
+
+    Duvod je, ze translace pozove kosti je v jejich lokalnich osach. Sablona
+    stavi boky z proporci meshe, takze jejich klidova orientace nesedi s tou
+    Mixamovou a stejny vektor miri jinam - hodnoty urcene pro jednu kostru
+    na druhe nedavaji smysl. Rotace tim netrpi, ty se prenaseji spravne.
+
+    Obe cilove hry si pohyb postavy ridi samy, takze o nic neprichazime.
+    """
+    path = f'pose.bones["{hips}"].location'
+    stripped = 0
+    for fc in list(action.fcurves):
+        if fc.data_path != path:
+            continue
+        for kp in fc.keyframe_points:
+            kp.co.y = 0.0
+            kp.handle_left.y = 0.0
+            kp.handle_right.y = 0.0
+        fc.update()
+        stripped += 1
+    return stripped
+
+
 def bones_in_action(action):
     """Nazvy kosti, na ktere action sahá - pro kontrolu, ze kostra sedi."""
     names = set()
@@ -159,7 +190,10 @@ def main():
     for tr in list(target.animation_data.nla_tracks):
         target.animation_data.nla_tracks.remove(tr)
 
-    ranges, missing, ratios = {}, {}, {}
+    # Obe cilove hry si pohyb postavy ridi samy, takze klip ma animovat na
+    # miste. Vypnout jde per job pro pripad, ze by nekdo root motion chtel.
+    in_place = job.get("in_place", True)
+    ranges, missing, ratios, stripped = {}, {}, {}, {}
     cursor = 1
     for clip in job["clips"]:
         clip_id = clip["id"]
@@ -169,6 +203,10 @@ def main():
         ratio = round(target_h / src_h, 4) if src_h > 0 else 0.0
         ratios[clip_id] = ratio
         action = take_action(objs, clip_id, float(clip.get("location_scale", 1.0)))
+        if in_place:
+            # POZOR: MIXAMO_PREFIX je bez dvojtecky (slouzi na startswith),
+            # takze se sem nesmi jen zretezit - kost je "mixamorig:Hips".
+            stripped[clip_id] = strip_root_motion(action, HIPS_BONE)
 
         gap = bones_in_action(action) - target_bones
         if gap:
@@ -209,6 +247,8 @@ def main():
         "mixamo_bones": len(mixamo_bones),
         "bones_missing_in_target": missing,
         "height_ratio": ratios,
+        "in_place": in_place,
+        "root_motion_stripped": stripped,
         "blend": os.path.basename(blend_path),
     }
     with open(os.path.join(out_dir, "retarget_ranges.json"), "w") as f:
