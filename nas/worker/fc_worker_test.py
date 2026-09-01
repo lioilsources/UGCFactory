@@ -202,5 +202,28 @@ class TestPrefixCandidates(unittest.TestCase):
         self.assertEqual(fc_worker.prefix_candidates(wf), [])
 
 
+class TestInputKeyByNode(unittest.TestCase):
+    """Vstupni parametr se jmenuje podle nodu - LoadImage "image",
+    UniRigLoadMesh "file_path". Titulek urcuje nod, ne parametr."""
+
+    def test_loadimage_uses_image(self):
+        wf = {"1": {"_meta": {"title": "FC_INPUT_IMAGE"},
+                    "inputs": {"image": "old.png", "upload": "image"}}}
+        self.assertEqual(fc_worker.set_titled_source(wf, "FC_INPUT_IMAGE", "new.png"), 1)
+        self.assertEqual(wf["1"]["inputs"]["image"], "new.png")
+
+    def test_loadmesh_uses_file_path(self):
+        wf = {"1": {"_meta": {"title": "FC_INPUT_IMAGE"},
+                    "inputs": {"source_folder": "input", "file_path": "old.glb"}}}
+        fc_worker.set_titled_source(wf, "FC_INPUT_IMAGE", "new.glb")
+        self.assertEqual(wf["1"]["inputs"]["file_path"], "new.glb")
+        self.assertEqual(wf["1"]["inputs"]["source_folder"], "input")
+        self.assertNotIn("image", wf["1"]["inputs"])
+
+    def test_no_titled_node_is_reported(self):
+        wf = {"1": {"_meta": {"title": "neco jineho"}, "inputs": {"image": "x"}}}
+        self.assertEqual(fc_worker.set_titled_source(wf, "FC_INPUT_IMAGE", "y"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

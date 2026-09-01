@@ -50,6 +50,12 @@ WORKFLOWS = {
 TITLE_INPUT_IMAGE = "FC_INPUT_IMAGE"
 TITLE_SEED = "FC_SEED"
 
+# Jak se jmenuje vstupni parametr, zavisi na nodu: LoadImage ma "image",
+# UniRigLoadMesh "file_path". Titulek proto rika, KTERY nod dostane vstup, a
+# parametr se vybere ten, ktery uz v nodu je. U rig kroku je vstupem mesh,
+# takze natvrdo psane "image" tam nikdy nesedelo.
+INPUT_KEYS = ("image", "file_path", "mesh", "model_file", "path")
+
 
 def api(path, payload=None, method=None):
     req = urllib.request.Request(API + path, method=method or ("POST" if payload is not None else "GET"))
@@ -111,6 +117,22 @@ def set_titled_input(workflow, title, key, value):
     return hits
 
 
+def set_titled_source(workflow, title, value):
+    """Preda vstup nodu podle titulku, do parametru, ktery ten nod ma.
+    Vraci pocet nodu, ktere sedly."""
+    hits = 0
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("_meta", {}).get("title") != title:
+            continue
+        inputs = node.setdefault("inputs", {})
+        key = next((k for k in INPUT_KEYS if k in inputs), INPUT_KEYS[0])
+        inputs[key] = value
+        hits += 1
+    return hits
+
+
 def comfy_post(path, payload):
     req = urllib.request.Request(COMFY + path, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
@@ -164,7 +186,7 @@ def comfy_run(step, image_path):
     workflow, name = load_workflow(step)
     if image_path:
         uploaded = comfy_upload(image_path)
-        if not set_titled_input(workflow, TITLE_INPUT_IMAGE, "image", uploaded):
+        if not set_titled_source(workflow, TITLE_INPUT_IMAGE, uploaded):
             raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
 
     prompt_id = comfy_post("/prompt", {"prompt": workflow})["prompt_id"]
@@ -204,6 +226,14 @@ def prefix_candidates(workflow):
         exts = [fmt] if isinstance(fmt, str) and fmt else ["glb", "fbx", "png"]
         for ext in exts:
             out.append((f"{base}_00001_.{ext}", subfolder, "output"))
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        # MIAAutoRig si FBX pojmenuje sam podle vzoru "<fbx_name>_mia.fbx"
+        # a neni output node, takze v history po nem taky nic nezustane.
+        name = (node.get("inputs") or {}).get("fbx_name")
+        if isinstance(name, str) and name:
+            out.append((f"{name}_mia.fbx", "", "output"))
     return out
 
 

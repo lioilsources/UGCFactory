@@ -1,0 +1,24 @@
+{
+  "1": {
+    "class_type": "UniRigLoadMesh",
+    "_meta": {"title": "FC_INPUT_IMAGE"},
+    "inputs": {"source_folder": "input", "file_path": "placeholder.glb"}
+  },
+  "2": {
+    "class_type": "MIALoadModel",
+    "_meta": {"title": "FC_MIA_MODEL"},
+    "inputs": {"precision": "fp16", "attn_backend": "sdpa"}
+  },
+  "3": {
+    "class_type": "MIAAutoRig",
+    "_meta": {"title": "FC_OUTPUT"},
+    "inputs": {
+      "trimesh": ["1", 0],
+      "model": ["2", 0],
+      "fbx_name": "fc_rig",
+      "no_fingers": true,
+      "use_normal": true,
+      "reset_to_rest": false
+    }
+  }
+}

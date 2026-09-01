@@ -56,6 +56,34 @@ def import_fbx(path):
     return [o for o in bpy.context.scene.objects if o not in before]
 
 
+def relink_texture(out_dir):
+    """Napoji obrazky bez dat na atlas z cleanupu.
+
+    MIA zapise do rigged.fbx odkaz na texturu, ktery miri na adresar
+    rigged.fbm/, ne na soubor v nem. Obrazek pak prijde prazdny, pack_all nema
+    co zabalit a glTF export material vypise bez textury - clean.glb texturu
+    mel, model.glb uz ne (2026-09-01). Atlas z fc_cleanup lezi vedle, tak ho
+    pouzijeme."""
+    atlas = os.path.join(out_dir, "clean_tex.png")
+    if not os.path.exists(atlas):
+        return []
+    fixed = []
+    for img in bpy.data.images:
+        if img.packed_file is not None:
+            continue
+        resolved = bpy.path.abspath(img.filepath) if img.filepath else ""
+        if resolved and os.path.isfile(resolved):
+            continue
+        img.filepath = atlas
+        img.source = "FILE"
+        try:
+            img.reload()
+        except RuntimeError:
+            continue
+        fixed.append(img.name)
+    return fixed
+
+
 def armature_height(arm):
     """Vyska kostry v jejich vlastnich jednotkach. Mixamo exportuje 'Without
     Skin' v centimetrech, rigovana postava z pipeline je v metrech - kdyby
@@ -154,12 +182,20 @@ def main():
         ranges[clip_id] = [cursor, cursor + length]
         cursor += length + GAP_FRAMES
 
+
     if not ranges:
         raise RuntimeError("zadny klip se nepodarilo nacist")
 
     scene = bpy.context.scene
     scene.frame_start = 1
     scene.frame_end = max(r[1] for r in ranges.values())
+
+    # Zabalit texturu do blendu: fc_export otevira soubor samostatne a na
+    # relativni cesty uz nespoleha.
+    relinked = relink_texture(out_dir)
+    if relinked:
+        print("textura napojena na clean_tex.png: %s" % relinked, flush=True)
+    bpy.ops.file.pack_all()
 
     blend_path = os.path.join(out_dir, "animated.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
