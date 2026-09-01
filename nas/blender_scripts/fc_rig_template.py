@@ -224,6 +224,53 @@ def _parent(mesh, arm, kind):
     bpy.ops.object.parent_set(type=kind)
 
 
+def open_edges_of(obj):
+    """Pocet hran jen s jednou stenou, tedy okraju der."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    n = sum(1 for e in bm.edges if len(e.link_faces) < 2)
+    bm.free()
+    return n
+
+
+def repair_for_binding(mesh):
+    """Heat weighting potrebuje uzavrenou plochu; na meshi s derami selze.
+    Cleanup uz jednou remeshoval, presto z nej vysel model se 129 otevrenymi
+    hranami (Test Knight, 2026-09-01) - proto se diry zavrou jeste tady,
+    tesne pred vazbou. Vraci pocet otevrenych hran pred a po."""
+    before = open_edges_of(mesh)
+    if before == 0:
+        return before, before
+    bpy.context.view_layer.objects.active = mesh
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.remove_doubles(threshold=0.0005)
+    bpy.ops.mesh.select_all(action="DESELECT")
+    # jen okraje der, ne dráty a nespojite vrcholy - ty fill_holes nezajimaji
+    bpy.ops.mesh.select_non_manifold(
+        extend=False, use_wire=False, use_boundary=True,
+        use_multi_face=False, use_non_contiguous=False, use_verts=False)
+    bpy.ops.mesh.fill_holes(sides=0)          # sides=0 = bez limitu velikosti diry
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return before, open_edges_of(mesh)
+
+
+def size_envelopes(arm, height):
+    """Obalka bez nastavenych polomeru je k nicemu: Blender ma vychozi
+    envelope_distance 0.25 bez ohledu na meritko, takze u 1.8 m postavy
+    vetsina vrcholu spadne mimo vsechny kosti nebo do spatne. Polomery se
+    proto odvodi z vysky postavy."""
+    r = height * 0.055
+    bpy.context.view_layer.objects.active = arm
+    for b in arm.data.bones:
+        b.envelope_distance = max(r, b.length * 0.5)
+        b.head_radius = r
+        b.tail_radius = r
+
+
 def bind(mesh, arm):
     """Heat map vahy, s obalkou jako zachranou.
 
@@ -235,6 +282,7 @@ def bind(mesh, arm):
     if weighted_verts(mesh) > 0:
         return "heat"
     print("heat map nechala vahy prazdne, zkousim obalku", flush=True)
+    size_envelopes(arm, arm.dimensions.z or 1.8)
     for vg in list(mesh.vertex_groups):
         mesh.vertex_groups.remove(vg)
     for md in [m for m in mesh.modifiers if m.type == "ARMATURE"]:
@@ -242,6 +290,40 @@ def bind(mesh, arm):
     mesh.parent = None
     _parent(mesh, arm, "ARMATURE_ENVELOPE")
     return "envelope" if weighted_verts(mesh) > 0 else "none"
+
+
+def weld_orphans(mesh, arm):
+    """Prirad kazdy vrchol bez vahy nejblizsi kosti.
+
+    Nezavazany vrchol se pri animaci nehne z mista. Kdyz ma klip root motion
+    (Mixamo bez volby "In Place"), zbytek postavy odejde pryc a mesh se mezi
+    stojicimi a odchazejicimi vrcholy natahne pres celou scenu. Zmereno na
+    Test Knight: 203 vrcholu z 3146 zustalo stat a bbox meshe vyrostl behem
+    32 snimku z 1.2 na 102 jednotek - presne ty "placky", co bylo videt v
+    appce misto postavy.
+    """
+    bones = [b for b in arm.data.bones]
+    if not bones:
+        return 0
+    groups = {b.name: (mesh.vertex_groups.get(b.name) or mesh.vertex_groups.new(name=b.name))
+              for b in bones}
+    inv = mesh.matrix_world.inverted()
+    heads = [(b.name, inv @ (arm.matrix_world @ b.head_local),
+              inv @ (arm.matrix_world @ b.tail_local)) for b in bones]
+
+    fixed = 0
+    for v in mesh.data.vertices:
+        if any(g.weight > 0.0001 for g in v.groups):
+            continue
+        best, bestd = None, None
+        for name, head, tail in heads:
+            mid = (head + tail) / 2
+            d = (v.co - mid).length
+            if bestd is None or d < bestd:
+                best, bestd = name, d
+        groups[best].add([v.index], 1.0, "REPLACE")
+        fixed += 1
+    return fixed
 
 
 def max_influences(mesh):
@@ -279,8 +361,10 @@ def main():
     mesh = import_glb(job["glb"])
     m = measure(mesh)
     arm = build_armature(m)
+    holes_before, holes_after = repair_for_binding(mesh)
     method = bind(mesh, arm)
 
+    orphans_fixed = weld_orphans(mesh, arm)
     unweighted = unweighted_verts(mesh)
     if method == "none":
         raise RuntimeError("ani heat map, ani obalka nepridelily vahy - "
@@ -292,8 +376,11 @@ def main():
         "fbx": os.path.basename(fbx),
         "bones": len(arm.data.bones),
         "weights": method,
+        "open_edges_before_bind": holes_before,
+        "open_edges_after_repair": holes_after,
         "max_influences": max_influences(mesh),
         "unweighted_verts": unweighted,
+        "orphans_welded": orphans_fixed,
         "vert_count": len(mesh.data.vertices),
         "height_m": round(m["height"], 4),
         "shoulder_half_width": round(m["shoulder_x"], 4),

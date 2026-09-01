@@ -305,6 +305,16 @@ func (s *Store) SetCharacterStatus(id, next string, from ...string) (bool, error
 	return n > 0, nil
 }
 
+// ClearCharacterError maze chybu po uspesnem kroku. Bez toho si postava,
+// ktera po retry dobehne, nese starou hlasku az do stavu 'done' - a appka
+// pak vedle zelene fajfky ukazuje cervenou chybu (videno na Test Knight,
+// char.rig selhal 5x nez se nasadila sablona).
+func (s *Store) ClearCharacterError(id string) error {
+	_, err := s.db.Exec("UPDATE characters SET error='', updated_at=? WHERE id=? AND error != ''",
+		time.Now().UTC().Format(timeFmt), id)
+	return err
+}
+
 func (s *Store) SetCharacterError(id, msg string) error {
 	_, err := s.db.Exec("UPDATE characters SET status='failed', error=?, updated_at=? WHERE id=?",
 		msg, time.Now().UTC().Format(timeFmt), id)

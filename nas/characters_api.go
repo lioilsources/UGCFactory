@@ -640,6 +640,7 @@ func (s *Server) handleFCWorkerResult(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusConflict, "step %d is not running", step.ID)
 		return
 	}
+	s.store.ClearCharacterError(step.CharacterID)
 	s.finishExport(step, "done", "", res.ExternalID, res.Artifact)
 
 	// pipeline krok posune stav a zaradi dalsi; export krok nechava stav byt
