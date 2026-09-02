@@ -371,3 +371,36 @@ Omezení: šablona předpokládá humanoida stojícího zpředma. Report má
 Na stroji leží připravené: UniRig node jako `custom_nodes/ComfyUI-UniRig.disabled`
 (nenačte se) i s váhami v `models/unirig/` (2,8 GB), a MIA v `~/Code/Make-It-Animatable`
 s checkpointy (2,2 GB). Přepnout zpět jde přes `FC_RIG=comfy`.
+
+### Váhy: proč se pořád padá na obálku (měřeno 2026-09-02)
+
+Heat weighting na modelech z pipeline selhává. Příčina **není děravost**, jak
+to napoprvé vypadalo — proxy po voxel remeshi má nula otevřených hran a heat
+map přesto vrátí prázdno. Rozhoduje **počet nespojitých kusů**: brnění Test
+Knighta se při jemném voxelu rozpadlo na 112 ostrůvků a Blender hlásí
+*„failed to find solution for one or more bones"*, protože do většiny z nich
+žádná kost nezasahuje. Hrubší voxel je slije:
+
+| voxel (podíl bboxu) | vrcholů | kusů | obarveno |
+|---|---|---|---|
+| 0,012 | 12516 | 112 | **0** |
+| 0,020 | 3762 | 25 | vše |
+| 0,045 | 580 | 4 | vše |
+
+`bind_via_proxy` proto zkouší hrubosti od nejjemnější a váhy z proxy přenáší
+zpět interpolací; originál si nechá geometrii, UV i materiál.
+
+**Ale jasného vítěze to nedalo.** Natažení hran během klipu:
+
+| | průměr | nejhorších 0,1 % | jejich klidová délka |
+|---|---|---|---|
+| obálka | 1,0188 | 2,94× | 22,6 mm |
+| heat-proxy | **1,0114** | 4,86× | **38,5 mm** |
+
+Proxy deformuje celkově hladčeji, ale roztahuje hrany **běžné velikosti**,
+zatímco obálka jen krátké — a právě to je vidět jako střepy. Omezení na čtyři
+váhy na vrchol s tím nehnulo (4,86 → 4,76).
+
+Proto je metoda přepínatelná přes `FC_RIG_WEIGHTS` (`auto` | `proxy` |
+`envelope`), ne zadrátovaná. Rozhodnout to podle čísel nejde, obě metriky
+mluví proti sobě.

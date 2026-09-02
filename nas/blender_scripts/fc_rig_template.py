@@ -28,6 +28,7 @@ import bpy
 from mathutils import Vector
 
 MIXAMO = "mixamorig:"
+MAX_WEIGHTS = 4        # strop vah na vrchol; shoduje se s limitem Robloxu
 
 # Vyskove pomery kostry vuci vysce postavy. Cisla jsou z Mixamo mannequina
 # (zmereno na 1.8 m figure), ne vycucana: hips 0.53 je presne to, co dela
@@ -265,6 +266,49 @@ def weighted_verts(mesh):
                if any(g.weight > 0.0001 for g in v.groups))
 
 
+def reset_binding(mesh):
+    """Zahodi vysledek predchoziho pokusu, at dalsi zacina na cistem."""
+    for vg in list(mesh.vertex_groups):
+        mesh.vertex_groups.remove(vg)
+    for md in [m for m in mesh.modifiers if m.type == "ARMATURE"]:
+        mesh.modifiers.remove(md)
+    mesh.parent = None
+
+
+def weight_locality(mesh, arm):
+    """Prumerna vzdalenost vrcholu od kosti, ktera na nem ma nejvetsi vahu.
+
+    Male cislo = vrchol patri kosti, ktera lezi v nem. Velke = vahy sedi na
+    kosti nekde jinde, coz je presne to, co obalka delá s plastem a co se pak
+    pri animaci trha. Tohle rozlisi dobre a spatne vahy bez divani se.
+    """
+    bones = {}
+    for b in arm.data.bones:
+        h = mesh.matrix_world.inverted() @ (arm.matrix_world @ b.head_local)
+        tl = mesh.matrix_world.inverted() @ (arm.matrix_world @ b.tail_local)
+        bones[b.name] = (h, tl)
+    idx_to_name = {vg.index: vg.name for vg in mesh.vertex_groups}
+
+    total, count = 0.0, 0
+    for v in mesh.data.vertices:
+        best = None
+        for g in v.groups:
+            if best is None or g.weight > best.weight:
+                best = g
+        if best is None or best.weight <= 0.0001:
+            continue
+        seg = bones.get(idx_to_name.get(best.group, ""))
+        if seg is None:
+            continue
+        head, tail = seg
+        d = tail - head
+        L2 = d.dot(d)
+        u = 0.0 if L2 == 0 else max(0.0, min(1.0, (v.co - head).dot(d) / L2))
+        total += (v.co - (head + d * u)).length
+        count += 1
+    return round(total / count, 4) if count else None
+
+
 def _parent(mesh, arm, kind):
     bpy.ops.object.select_all(action="DESELECT")
     mesh.select_set(True)
@@ -320,6 +364,89 @@ def size_envelopes(arm, height):
         b.tail_radius = r
 
 
+# Hrubost proxy meshe jako podil nejdelsi hrany bboxu. Zkousi se od nejjemnejsi;
+# jemnejsi drzi vic detailu pro zpetnou interpolaci, ale rozpada se na ostruvky.
+PROXY_VOXEL_FRACTIONS = (0.02, 0.03, 0.045, 0.06)
+
+
+def bind_via_proxy(mesh, arm):
+    """Heat map na hrube uzavrene kopii, vahy pak prenest na original.
+
+    Heat weighting na modelech z pipeline selhava a padalo se na obalku. Duvod
+    neni deravost, jak jsem si myslel: proxy po jemnem voxel remeshi je
+    uzavrena (0 otevrenych hran) a heat map presto vrati prazdno. Rozhoduje
+    pocet nespojitych kusu - brneni Test Knighta se rozpadlo na 112 ostruvku a
+    Blender hlasi "failed to find solution for one or more bones", protoze do
+    vetsiny z nich zadna kost nezasahuje.
+
+    Zmereno na tom rytiri (voxel jako podil bboxu):
+        0.012 -> 12516 vrcholu, 112 kusu, 0 obarvenych
+        0.020 ->  3762 vrcholu,  25 kusu, vsechny obarvene
+        0.045 ->   580 vrcholu,   4 kusy, vsechny obarvene
+
+    Hrubsi voxel ostruvky slije. Proxy nemusi byt hezka, slouzi jen k vypoctu
+    vah, ktere se interpolaci vrati na original - ten si nechá geometrii, UV
+    i material.
+    """
+    for frac in PROXY_VOXEL_FRACTIONS:
+        proxy = mesh.copy()
+        proxy.data = mesh.data.copy()
+        proxy.name = "WeightProxy"
+        bpy.context.scene.collection.objects.link(proxy)
+
+        bpy.context.view_layer.objects.active = proxy
+        mod = proxy.modifiers.new("Remesh", "REMESH")
+        mod.mode = "VOXEL"
+        mod.voxel_size = max(max(proxy.dimensions) * frac, 0.004)
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+
+        _parent(proxy, arm, "ARMATURE_AUTO")
+        if weighted_verts(proxy) == 0:
+            print(f"  proxy voxel {frac}: heat map prazdna, zkousim hrubsi", flush=True)
+            bpy.data.objects.remove(proxy, do_unlink=True)
+            continue
+
+        # data_transfer bere ZDROJ z aktivniho objektu a cil z vyberu
+        bpy.ops.object.select_all(action="DESELECT")
+        mesh.select_set(True)
+        bpy.context.view_layer.objects.active = proxy
+        bpy.ops.object.data_transfer(
+            data_type="VGROUP_WEIGHTS",
+            use_create=True,
+            vert_mapping="POLYINTERP_NEAREST",
+            layers_select_src="ALL",
+            layers_select_dst="NAME",
+        )
+        bpy.data.objects.remove(proxy, do_unlink=True)
+
+        if weighted_verts(mesh) == 0:
+            print(f"  proxy voxel {frac}: prenos vah nic nedal", flush=True)
+            reset_binding(mesh)
+            continue
+
+        _parent(mesh, arm, "ARMATURE_NAME")   # navazat bez prepocitavani vah
+        bpy.context.view_layer.objects.active = mesh
+        # Interpolace z proxy mícha i deset kosti na vrchol a vznikaji z toho
+        # skoky mezi vzdalenymi kostmi - prave ty trhaji geometrii. Omezeni na
+        # ctyri vahy je zaroven to, co chce Roblox, takze se tim nic neztraci.
+        bpy.ops.object.select_all(action="DESELECT")
+        mesh.select_set(True)
+        bpy.context.view_layer.objects.active = mesh
+        bpy.ops.object.vertex_group_limit_total(limit=MAX_WEIGHTS)
+        # Vyhlazeni je bonus, ne nutnost - operator chce aktivni skupinu a na
+        # nekterych scenach mu neprojde poll. Kdyz nejde, jede se bez nej.
+        if mesh.vertex_groups:
+            mesh.vertex_groups.active_index = 0
+            try:
+                bpy.ops.object.vertex_group_smooth(factor=0.5, repeat=2)
+            except RuntimeError as e:
+                print(f"  vyhlazeni vah preskoceno: {e}", flush=True)
+        bpy.ops.object.vertex_group_normalize_all(lock_active=False)
+        print(f"  proxy voxel {frac}: vahy prenesene", flush=True)
+        return frac
+    return None
+
+
 def bind(mesh, arm):
     """Heat map vahy, s obalkou jako zachranou.
 
@@ -327,16 +454,27 @@ def bind(mesh, arm):
     nechá je prazdne - stane se to u meshe slozeneho z odpojenych kusu.
     Vyjimka pritom nepadne, takze se to musi poznat spocitanim vah. Zmereno
     na testovaci figure z devíti kvadru: 22 skupin, 0 vah, zadna chyba."""
-    _parent(mesh, arm, "ARMATURE_AUTO")
-    if weighted_verts(mesh) > 0:
-        return "heat"
-    print("heat map nechala vahy prazdne, zkousim obalku", flush=True)
+    # auto | proxy | envelope. Mereni na Test Knightovi (natazeni hran behem
+    # klipu) nedalo jasneho vitěze: proxy ma o 40 % mensi PRUMERNOU distorzi
+    # (1.0117 vs 1.0188), ale horsi extremy - a hlavne roztahuje hrany bezne
+    # velikosti (median nejhorsich 38 mm) misto kratkych (23 mm u obalky),
+    # takze je to vic videt. Proto je to prepinatelne a ne zadratovane.
+    prefer = os.environ.get("FC_RIG_WEIGHTS", "auto")
+
+    if prefer != "envelope":
+        _parent(mesh, arm, "ARMATURE_AUTO")
+        if weighted_verts(mesh) > 0:
+            return "heat"
+    if prefer in ("auto", "proxy"):
+        print("heat map nechala vahy prazdne, zkousim proxy", flush=True)
+        reset_binding(mesh)
+        frac = bind_via_proxy(mesh, arm)
+        if frac:
+            return f"heat-proxy({frac})"
+        print("proxy nepomohla, zkousim obalku", flush=True)
+
+    reset_binding(mesh)
     size_envelopes(arm, arm.dimensions.z or 1.8)
-    for vg in list(mesh.vertex_groups):
-        mesh.vertex_groups.remove(vg)
-    for md in [m for m in mesh.modifiers if m.type == "ARMATURE"]:
-        mesh.modifiers.remove(md)
-    mesh.parent = None
     _parent(mesh, arm, "ARMATURE_ENVELOPE")
     return "envelope" if weighted_verts(mesh) > 0 else "none"
 
@@ -458,6 +596,7 @@ def main():
         "height_m": round(m["height"], 4),
         "shoulder_half_width": round(m["shoulder_x"], 4),
         "leg_half_width": round(m["leg_x"], 4),
+        "weight_locality": weight_locality(mesh, arm),
         "arm_fit": bone_fit(mesh, arm, [MIXAMO + n for n in
                             ("LeftArm", "LeftForeArm", "RightArm", "RightForeArm")]),
         "arm_pts": [m.get("arm_left_pts", 0), m.get("arm_right_pts", 0)],
