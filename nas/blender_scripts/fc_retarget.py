@@ -4,15 +4,15 @@
 
 Job JSON: {"id", "rigged_fbx", "out_dir", "clips": [{"id","fbx_path"}, ...]}
 
-Retarget addon netreba: MIA i UniRig davaji Mixamo kostru, takze nazvy kosti
-sedi a staci prekopirovat Action.
+Retarget addon netreba, kosti se paruji podle Mixamo jmen. Action se ale
+NEkopiruje: sablona ma kosti natocene jinak nez Mixamo, takze se klip
+prepeca pres svetove osy kosti - proc, je v docstringu bake_clip.
 
-Translace se ZAMERNE neprepocitava. Merenim na fixture s klipem ve 100x
-meritku (testdata/gen_fc_fixture.py) vyslo, ze FBX import translacni kanaly
-uz normalizuje sam - automaticka korekce podle vysky kostry je zkorigovala
-podruhe a klip skoncil presne 100x mimo. Pomer vysek se proto jen mericky
-hlasi v reportu jako height_ratio; kdyz nekdy narazime na klip, ktery ho
-opravdu potrebuje, da se zapnout per-klip pres "location_scale" v jobu.
+Translace boku se bere ve svete, ne z krivek: tam je uz v metrech (matrix_world
+zdroje nese meritko 0.01), takze staci pomer vysek koster. Z krivek to
+nejde - FBX import translacni kanaly normalizuje sam a korekce podle vysky
+je na fixture ve 100x meritku (testdata/gen_fc_fixture.py) zkorigovala
+podruhe. "location_scale" v jobu posun jeste vynasobi, vychozi 1.0.
 
 Klipy jdou za sebou na jedne timeline s 5-frame mezerou (Luanti umi jen jednu
 timeline + frame ranges) a zaroven kazdy dostane vlastni NLA track
@@ -28,6 +28,7 @@ import os
 import sys
 
 import bpy
+from mathutils import Matrix, Vector
 
 GAP_FRAMES = 5          # mezera mezi klipy, at posledni snimek nepretece do dalsiho
 MIXAMO_PREFIX = "mixamorig"
@@ -94,66 +95,107 @@ def armature_height(arm):
     return max(zs) - min(zs) if zs else 0.0
 
 
-def scale_location_curves(action, factor):
-    """Pouzije se jen na vyslovnou zadost pres job["clips"][i]["location_scale"] -
-    viz poznamka v docstringu, proc to neni automaticke."""
-    if abs(factor - 1.0) < 1e-6:
-        return
-    for fc in action.fcurves:
-        if not fc.data_path.endswith(".location"):
+def rotation_of(matrix):
+    """Rotace bez meritka - zdrojova armatura ma v matrix_world scale 0.01."""
+    return matrix.to_3x3().normalized().to_quaternion()
+
+
+def hierarchy_order(arm):
+    """Rodice pred detmi: pozu ditete jde spocitat jen z hotove pozy rodice."""
+    return sorted(arm.data.bones, key=lambda b: len(b.parent_recursive))
+
+
+def bake_clip(target, src, clip_id, translation_scale, in_place):
+    """Prenese klip ze zdrojove armatury na cilovou pres svetove osy kosti.
+
+    Kopirovat Action 1:1 jde jen mezi kostrami se stejne natocenymi kostmi.
+    Sablona (fc_rig_template.py) ma jen Mixamo jmena: nohy a klicni kosti
+    ma otocene o 180 stupnu kolem vlastni osy a paze v klidu miri dolu, ne
+    do T-pozy. Stejny lokalni kvaternion pak toci kost kolem jine osy -
+    zmereno na Zombie Walk 2026-09-15: stehno v prumeru 66 stupnu mimo
+    zdroj, nejvic 116, postava se v pase prelozila a nohy sly vodorovne.
+
+    Proto se pro kazdou kost jednou spocita korekce C = S_rest^-1 * A *
+    T_rest (A srovna smer cilove kosti v klidu se zdrojovou) a v kazdem
+    snimku ma cilova kost svetovou rotaci S(f) * C. Kost pak miri tam, kam
+    ve zdroji, at je jeji klidova poza nebo natoceni jakekoli.
+
+    Boky nesou i vysku: posun boku oproti klidu se prenese ve svete,
+    zmenseny pomerem vysek kostry. S in_place se zahodi vodorovna slozka,
+    houpani nahoru a dolu zustane - bez nej chodidla pri chuzi zajizdela
+    pod zem a vyletovala nad ni. Vraci (action, rozsah houpani v m)."""
+    bones = hierarchy_order(target)
+    src_bones = {pb.name: pb for pb in src.pose.bones}
+    src_rot_w = rotation_of(src.matrix_world)
+    tgt_rot_w = rotation_of(target.matrix_world)
+    tgt_rot_w_inv = tgt_rot_w.inverted()
+
+    correction = {}
+    for b in bones:
+        sb = src.data.bones.get(b.name)
+        if sb is None:
             continue
-        for kp in fc.keyframe_points:
-            kp.co.y *= factor
-            kp.handle_left.y *= factor
-            kp.handle_right.y *= factor
+        s_rest = src_rot_w @ rotation_of(sb.matrix_local)
+        t_rest = tgt_rot_w @ rotation_of(b.matrix_local)
+        align = (t_rest @ Vector((0, 1, 0))).rotation_difference(s_rest @ Vector((0, 1, 0)))
+        correction[b.name] = s_rest.inverted() @ align @ t_rest
+
+    hips_rest_w = src.matrix_world @ src.data.bones[HIPS_BONE].head_local
+
+    action = bpy.data.actions.new(clip_id)
+    action.use_fake_user = True
+    start, end = (int(round(x)) for x in src.animation_data.action.frame_range)
+    scene = bpy.context.scene
+    keys = {b.name: [] for b in bones}
+    hips_keys, previous, bob = [], {}, []
+
+    for frame in range(start, end + 1):
+        scene.frame_set(frame)
+        posed = {}
+        for b in bones:
+            if b.parent is None:
+                base = b.matrix_local.copy()
+            else:
+                base = posed[b.parent.name] @ (b.parent.matrix_local.inverted() @ b.matrix_local)
+            if b.name in correction:
+                world = src_rot_w @ rotation_of(src_bones[b.name].matrix) @ correction[b.name]
+                rot = tgt_rot_w_inv @ world
+            else:
+                rot = rotation_of(base)          # kost bez protejsku drzi klid
+            loc = base.translation.copy()
+            if b.name == HIPS_BONE:
+                delta_w = (src.matrix_world @ src_bones[HIPS_BONE].head) - hips_rest_w
+                delta_w *= translation_scale
+                if in_place:
+                    delta_w.x = delta_w.y = 0.0
+                bob.append(delta_w.z)
+                loc += tgt_rot_w_inv @ delta_w
+            posed[b.name] = Matrix.LocRotScale(loc, rot, None)
+            basis = base.inverted() @ posed[b.name]
+            q = basis.to_quaternion()
+            if b.name in previous:
+                q.make_compatible(previous[b.name])  # bez skoku znamenka mezi snimky
+            previous[b.name] = q
+            keys[b.name].append((frame, q))
+            if b.name == HIPS_BONE:
+                hips_keys.append((frame, basis.translation.copy()))
+
+    for name, frames in keys.items():
+        write_curves(action, name, "rotation_quaternion", frames, 4)
+    write_curves(action, HIPS_BONE, "location", hips_keys, 3)
+    for b in target.pose.bones:
+        b.rotation_mode = "QUATERNION"
+    return action, (round(max(bob) - min(bob), 3) if bob else 0.0)
 
 
-def take_action(objs, clip_id, scale):
-    """Vytahne Action z importovaneho klipu a uklidi po sobe importovane
-    objekty. scale je 1.0, dokud si klip vyslovne nerekne o jine."""
-    src = next((o for o in objs if o.type == "ARMATURE"), None)
-    if src is None:
-        raise RuntimeError(f"klip {clip_id}: FBX neobsahuje armaturu")
-    if not (src.animation_data and src.animation_data.action):
-        raise RuntimeError(f"klip {clip_id}: FBX neobsahuje animaci")
-    action = src.animation_data.action
-    action.name = clip_id
-    action.use_fake_user = True          # aby ji uklid objektu nesmazal
-    scale_location_curves(action, scale)
-    src.animation_data.action = None
-    for o in objs:
-        bpy.data.objects.remove(o, do_unlink=True)
-    return action
-
-
-def strip_root_motion(action, hips):
-    """Udela z klipu animaci na miste: vynuluje translaci boku, rotace nechá.
-
-    Puvodne to odecitalo jen linearni drift, aby zustalo houpani. Nefunguje
-    to: Mixamo klipy jsou zacyklene (prvni a posledni snimek maji stejnou
-    hodnotu), takze zadny drift k odecteni neni, a presto postava lita.
-    Zmereno na Moonwalk + sablonovou kostru: boky se pohybovaly v rozsahu
-    4 m a klesaly 2,5 m pod zem.
-
-    Duvod je, ze translace pozove kosti je v jejich lokalnich osach. Sablona
-    stavi boky z proporci meshe, takze jejich klidova orientace nesedi s tou
-    Mixamovou a stejny vektor miri jinam - hodnoty urcene pro jednu kostru
-    na druhe nedavaji smysl. Rotace tim netrpi, ty se prenaseji spravne.
-
-    Obe cilove hry si pohyb postavy ridi samy, takze o nic neprichazime.
-    """
-    path = f'pose.bones["{hips}"].location'
-    stripped = 0
-    for fc in list(action.fcurves):
-        if fc.data_path != path:
-            continue
-        for kp in fc.keyframe_points:
-            kp.co.y = 0.0
-            kp.handle_left.y = 0.0
-            kp.handle_right.y = 0.0
+def write_curves(action, bone, prop, frames, width):
+    path = f'pose.bones["{bone}"].{prop}'
+    for i in range(width):
+        fc = action.fcurves.new(path, index=i, action_group=bone)
+        fc.keyframe_points.add(len(frames))
+        co = [c for frame, value in frames for c in (frame, value[i])]
+        fc.keyframe_points.foreach_set("co", co)
         fc.update()
-        stripped += 1
-    return stripped
 
 
 def bones_in_action(action):
@@ -193,24 +235,34 @@ def main():
     # Obe cilove hry si pohyb postavy ridi samy, takze klip ma animovat na
     # miste. Vypnout jde per job pro pripad, ze by nekdo root motion chtel.
     in_place = job.get("in_place", True)
-    ranges, missing, ratios, stripped = {}, {}, {}, {}
+    ranges, missing, ratios, bobs = {}, {}, {}, {}
     cursor = 1
     for clip in job["clips"]:
         clip_id = clip["id"]
         objs = import_fbx(clip["fbx_path"])
         src = next((o for o in objs if o.type == "ARMATURE"), None)
-        src_h = armature_height(src) if src else 0.0
+        if src is None:
+            raise RuntimeError(f"klip {clip_id}: FBX neobsahuje armaturu")
+        if not (src.animation_data and src.animation_data.action):
+            raise RuntimeError(f"klip {clip_id}: FBX neobsahuje animaci")
+        # POZOR: MIXAMO_PREFIX je bez dvojtecky (slouzi na startswith),
+        # takze se kost boku nesklada z nej - je to "mixamorig:Hips".
+        if HIPS_BONE not in src.data.bones:
+            raise RuntimeError(f"klip {clip_id}: zdrojova kostra nema {HIPS_BONE}")
+        src_h = armature_height(src)
         ratio = round(target_h / src_h, 4) if src_h > 0 else 0.0
         ratios[clip_id] = ratio
-        action = take_action(objs, clip_id, float(clip.get("location_scale", 1.0)))
-        if in_place:
-            # POZOR: MIXAMO_PREFIX je bez dvojtecky (slouzi na startswith),
-            # takze se sem nesmi jen zretezit - kost je "mixamorig:Hips".
-            stripped[clip_id] = strip_root_motion(action, HIPS_BONE)
 
-        gap = bones_in_action(action) - target_bones
+        src_action = src.animation_data.action
+        gap = bones_in_action(src_action) - target_bones
         if gap:
             missing[clip_id] = sorted(gap)[:8]
+        action, bobs[clip_id] = bake_clip(
+            target, src, clip_id, ratio * float(clip.get("location_scale", 1.0)), in_place)
+
+        for o in objs:
+            bpy.data.objects.remove(o, do_unlink=True)
+        bpy.data.actions.remove(src_action)
 
         start, end = action.frame_range
         length = max(int(round(end - start)), 1)
@@ -248,7 +300,8 @@ def main():
         "bones_missing_in_target": missing,
         "height_ratio": ratios,
         "in_place": in_place,
-        "root_motion_stripped": stripped,
+        "retarget": "world_axes",
+        "hips_bob_m": bobs,
         "blend": os.path.basename(blend_path),
     }
     with open(os.path.join(out_dir, "retarget_ranges.json"), "w") as f:
