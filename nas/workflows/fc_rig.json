@@ -1,8 +1,8 @@
 {
   "1": {
-    "class_type": "UniRigLoadMesh",
+    "class_type": "Trellis2LoadMesh",
     "_meta": {"title": "FC_INPUT_IMAGE"},
-    "inputs": {"source_folder": "input", "file_path": "placeholder.glb"}
+    "inputs": {"glb_path": "placeholder.glb"}
   },
   "2": {
     "class_type": "MIALoadModel",
@@ -20,5 +20,10 @@
       "use_normal": true,
       "reset_to_rest": false
     }
+  },
+  "4": {
+    "class_type": "UniRigPreviewRiggedMesh",
+    "_meta": {"title": "FC_OUTPUT_NODE"},
+    "inputs": {"fbx_output_path": ["3", 0]}
   }
 }

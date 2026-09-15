@@ -54,7 +54,7 @@ TITLE_SEED = "FC_SEED"
 # UniRigLoadMesh "file_path". Titulek proto rika, KTERY nod dostane vstup, a
 # parametr se vybere ten, ktery uz v nodu je. U rig kroku je vstupem mesh,
 # takze natvrdo psane "image" tam nikdy nesedelo.
-INPUT_KEYS = ("image", "file_path", "mesh", "model_file", "path")
+INPUT_KEYS = ("image", "file_path", "glb_path", "mesh", "model_file", "path")
 
 
 def api(path, payload=None, method=None):
@@ -134,10 +134,16 @@ def set_titled_source(workflow, title, value):
 
 
 def comfy_post(path, payload):
+    """ComfyUI vraci duvod odmitnuti (chybejici vstup, neznamy soubor, graf
+    bez vystupu) v tele 400 - bez nej v chybe kroku zbyde jen "Bad Request"."""
     req = urllib.request.Request(COMFY + path, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")[:800]
+        raise RuntimeError(f"ComfyUI {path} {e.code}: {body}") from None
 
 
 def comfy_get(path):
