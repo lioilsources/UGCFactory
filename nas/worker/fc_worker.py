@@ -32,10 +32,14 @@ COMFY_TIMEOUT = int(os.environ.get("FC_COMFY_TIMEOUT", "1800"))
 # na 48 snimku (Cycles CPU, GPU tu neni), takze by drzel workera kvuli videu,
 # ktere je jen pohodli. Na 'full' prepnout, az bude render na Sparku.
 PREVIEW_MODE = os.environ.get("FC_PREVIEW", "thumb")
-# template | comfy. 'comfy' = MIA v ComfyUI na Sparku; bezi od 2026-09-15 (comfy-env
-# 0.4.1, torch_cluster pro izolovany Python 3.13, viz FANTASYCHARACTER_PLAN.md 13)
-# a deformuje lip nez sablona v Blenderu na JODA.
-RIG_MODE = os.environ.get("FC_RIG", "template")
+# auto | template | comfy. 'comfy' = MIA v ComfyUI na Sparku (bezi od 2026-09-15,
+# viz FANTASYCHARACTER_PLAN.md 13), 'template' = sablona v Blenderu na JODA.
+# Ani jedna nevyhrava vzdy - MIA u fotek cele postavy, sablona u brneni s
+# plastem a orezanych postav - takze 'auto' udela obe a vybere podle skore.
+RIG_MODE = os.environ.get("FC_RIG", "auto")
+# V rezimu auto je MIA jen jedna z moznosti; kdyz ComfyUI ceka na cizi ulohy,
+# nema smysl drzet pipeline pul hodiny - sablona je hotova za par sekund.
+RIG_MIA_TIMEOUT = int(os.environ.get("FC_RIG_MIA_TIMEOUT", "300"))
 
 # Kazdy ComfyUI krok ma vlastni workflow; fc_pipeline.json je fallback pro
 # pripad, ze fáze 1 skonci s jednim velkym grafem misto tri.
@@ -184,9 +188,14 @@ def comfy_upload(path):
     return "%s/%s" % (sub, out["name"]) if sub else out["name"]
 
 
-def comfy_run(step, image_path):
+def comfy_run(step, image_path, timeout=None):
     """Posle workflow a pocka na vysledek. Vraci seznam (filename, subfolder,
-    type) vsech vystupu, ktere ComfyUI zapsal."""
+    type) vsech vystupu, ktere ComfyUI zapsal.
+
+    Kdyz nedobehne vcas, prompt se z fronty smaze: ComfyUI na Sparku sdili
+    frontu s jinymi klienty a opusteny prompt by tam jinak cekal a pak zbytecne
+    bezel."""
+    timeout = COMFY_TIMEOUT if timeout is None else timeout
     if not COMFY:
         raise RuntimeError(f"{step}: FC_COMFY_URL neni nastavene")
     workflow, name = load_workflow(step)
@@ -197,7 +206,7 @@ def comfy_run(step, image_path):
             raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
 
     prompt_id = comfy_post("/prompt", {"prompt": workflow})["prompt_id"]
-    deadline = time.time() + COMFY_TIMEOUT
+    deadline = time.time() + timeout
     while time.time() < deadline:
         history = comfy_get(f"/history/{prompt_id}")
         entry = history.get(prompt_id)
@@ -208,7 +217,11 @@ def comfy_run(step, image_path):
             if status.get("completed") or entry.get("outputs"):
                 return collect_outputs(entry.get("outputs", {})) + prefix_candidates(workflow)
         time.sleep(3)
-    raise RuntimeError(f"{step}: ComfyUI nedobehl do {COMFY_TIMEOUT}s (prompt {prompt_id})")
+    try:
+        comfy_post("/queue", {"delete": [prompt_id]})
+    except (RuntimeError, urllib.error.URLError, OSError):
+        pass
+    raise RuntimeError(f"{step}: ComfyUI nedobehl do {timeout}s (prompt {prompt_id})")
 
 
 def unique_outputs(workflow, token):
@@ -325,36 +338,137 @@ def step_clean(claim):
                           "tri_count": report.get("tri_count", 0)}}
 
 
+def rig_template(claim, out_dir):
+    d, files = claim["dir"], claim["files"]
+    report = run_blender("fc_rig_template.py", {
+        "id": claim["character"]["id"],
+        "glb": os.path.join(d, files["clean_glb"]),
+        "out_dir": out_dir,
+    })
+    # Sablona predpoklada humanoida; kdyz mesh nesedi, rig vznikne, ale bude
+    # divny. Varovani patri do logu, at se to pozna driv nez na modelu.
+    if report.get("unweighted_verts") and report.get("vert_count"):
+        pct = 100.0 * report["unweighted_verts"] / report["vert_count"]
+        if pct > 25:
+            report.setdefault("fit_warnings", []).append(f"{pct:.0f} % vrcholu bez vahy")
+    return report
+
+
+def rig_mia(claim, out_dir, timeout=None):
+    """MIA vraci mesh ve svem normalizovanem meritku a cast vrcholu bez vahy;
+    fc_rig_mia.py z toho udela rigged.fbx stejneho tvaru jako sablona."""
+    d, files = claim["dir"], claim["files"]
+    os.makedirs(out_dir, exist_ok=True)
+    raw = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"]), timeout),
+                                  ".fbx"),
+                      os.path.join(out_dir, "rigged_mia_raw.fbx"))
+    return run_blender("fc_rig_mia.py", {
+        "id": claim["character"]["id"],
+        "fbx": raw,
+        "clean_glb": os.path.join(d, files["clean_glb"]),
+        "out_dir": out_dir,
+    })
+
+
+def score_rig(claim, rig_dir, clip):
+    """Nasadi na rig klip a zmeri, jak se mesh trha (fc_rig_score.py)."""
+    atlas = os.path.join(claim["dir"], "clean_tex.png")
+    if os.path.exists(atlas):
+        shutil.copy(atlas, os.path.join(rig_dir, "clean_tex.png"))
+    run_blender("fc_retarget.py", {
+        "id": claim["character"]["id"],
+        "rigged_fbx": os.path.join(rig_dir, "rigged.fbx"),
+        "out_dir": rig_dir,
+        "clips": [{"id": clip["id"], "fbx_path": clip["fbx_path"]}],
+    })
+    blend = os.path.join(rig_dir, "animated.blend")
+    try:
+        return run_blender("fc_rig_score.py", {"id": claim["character"]["id"], "blend": blend})
+    finally:
+        for name in ("animated.blend", "animated.blend1"):
+            path = os.path.join(rig_dir, name)
+            if os.path.exists(path):
+                os.remove(path)            # 5 MB na kandidata, ke dni nepotreba
+
+
+def choose_rig(candidates):
+    """Vybere rig s nejmensim prumernym natazenim hran.
+
+    candidates: {jmeno: {"report", "score", "error"}}. Rig bez skore (selhal
+    klip nebo mereni) prohrava s kazdym, ktery skore ma; kdyz nema skore
+    nikdo, vyhrava sablona - je deterministicka a nezavisi na Sparku.
+    Vraci jmeno, nebo None, kdyz se nepovedl zadny rig."""
+    built = {n: c for n, c in candidates.items() if not c.get("error")}
+    if not built:
+        return None
+    scored = {n: c["score"]["stretch_mean"] for n, c in built.items()
+              if c.get("score") and c["score"].get("stretch_mean") is not None}
+    if scored:
+        return min(scored, key=lambda n: (scored[n], n != "template"))
+    return "template" if "template" in built else sorted(built)[0]
+
+
+def install_rig(claim, rig_dir, extra):
+    """Zvoleny rig na misto, kde ho ceka animate: rigged.fbx (+ .fbm s
+    texturami) a rig_report.json s informaci, proc vyhral."""
+    d, files = claim["dir"], claim["files"]
+    shutil.copy(os.path.join(rig_dir, "rigged.fbx"), os.path.join(d, files["rigged_fbx"]))
+    fbm = os.path.join(rig_dir, "rigged.fbm")
+    if os.path.isdir(fbm):
+        shutil.rmtree(os.path.join(d, "rigged.fbm"), ignore_errors=True)
+        shutil.copytree(fbm, os.path.join(d, "rigged.fbm"))
+    report_path = os.path.join(rig_dir, "rig_report.json")
+    report = {}
+    if os.path.exists(report_path):
+        with open(report_path) as f:
+            report = json.load(f)
+    report.update(extra)
+    with open(os.path.join(d, "rig_report.json"), "w") as f:
+        json.dump(report, f, indent=2)
+    return report
+
+
 def step_rig(claim):
     d, files = claim["dir"], claim["files"]
-    if RIG_MODE == "comfy":
-        # MIA vraci mesh ve svem normalizovanem meritku a cast vrcholu bez vahy;
-        # fc_rig_mia.py z toho udela rigged.fbx stejneho tvaru jako sablona.
-        raw = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"])), ".fbx"),
-                          os.path.join(d, "rigged_mia_raw.fbx"))
-        report = run_blender("fc_rig_mia.py", {
-            "id": claim["character"]["id"],
-            "fbx": raw,
-            "clean_glb": os.path.join(d, files["clean_glb"]),
-            "out_dir": d,
-        })
+    if RIG_MODE in ("template", "comfy"):
+        report = rig_template(claim, d) if RIG_MODE == "template" else rig_mia(claim, d)
         for w in report.get("fit_warnings", []):
             print(f"  rig varovani: {w}", flush=True)
         return {"artifacts": {"rigged_fbx": os.path.join(d, files["rigged_fbx"])}}
 
-    report = run_blender("fc_rig_template.py", {
-        "id": claim["character"]["id"],
-        "glb": os.path.join(d, files["clean_glb"]),
-        "out_dir": d,
+    clips = claim.get("clips") or []
+    candidates = {}
+    for name, build in (("template", lambda out: rig_template(claim, out)),
+                        ("mia", lambda out: rig_mia(claim, out, RIG_MIA_TIMEOUT))):
+        out = os.path.join(d, f"rig_{name}")
+        os.makedirs(out, exist_ok=True)
+        entry = {}
+        try:
+            entry["report"] = build(out)
+        except Exception as e:           # MIA muze chybet, sablona na meshi selhat
+            entry["error"] = str(e)[:300]
+            print(f"  rig {name} selhal: {entry['error']}", flush=True)
+        if "error" not in entry and clips:
+            try:
+                entry["score"] = score_rig(claim, out, clips[0])
+            except Exception as e:
+                entry["score_error"] = str(e)[:300]
+                print(f"  skore {name} selhalo: {entry['score_error']}", flush=True)
+        candidates[name] = entry
+
+    choice = choose_rig(candidates)
+    if choice is None:
+        raise RuntimeError("zadny rig se nepovedl: " + "; ".join(
+            f"{n}: {c.get('error')}" for n, c in candidates.items()))
+    summary = {n: (c.get("score") or {"error": c.get("error") or c.get("score_error")})
+               for n, c in candidates.items()}
+    print(f"  rig: vybran {choice} {json.dumps(summary)}", flush=True)
+    report = install_rig(claim, os.path.join(d, f"rig_{choice}"), {
+        "rig_mode": "auto", "rig_choice": choice,
+        "rig_clip": clips[0]["id"] if clips else None, "rig_scores": summary,
     })
-    # Sablona predpoklada humanoida; kdyz mesh nesedi, rig vznikne, ale bude
-    # divny. Varovani patri do logu, at se to pozna driv nez na modelu.
     for w in report.get("fit_warnings", []):
         print(f"  rig varovani: {w}", flush=True)
-    if report.get("unweighted_verts") and report.get("vert_count"):
-        pct = 100.0 * report["unweighted_verts"] / report["vert_count"]
-        if pct > 25:
-            print(f"  rig varovani: {pct:.0f} % vrcholu bez vahy", flush=True)
     return {"artifacts": {"rigged_fbx": os.path.join(d, files["rigged_fbx"])}}
 
 

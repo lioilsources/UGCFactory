@@ -475,9 +475,12 @@ poloprůhledný (→ materiál z `clean.glb`).
 Z tabulky: MIA vyhrává u fotek celé postavy a v renderu je jediná, která
 vypadá jako reference (ruce vpředu, pokrčená kolena). U brnění s pláštěm,
 oříznutých postav a malby je výrazně horší — plášť roztáhne do křídel.
-Výchozí proto zůstává `template`; `FC_RIG=comfy` je volba. Nabízí se `auto`:
-rig oběma, stejný klip, vzít nižší natažení — na všech pěti postavách by to
-vybralo vizuálně lepší variantu.
+Výchozí je proto `FC_RIG=auto`: rig oběma cestami, na každý první klip
+postavy, nechat nižší průměrné natažení (`fc_rig_score.py`, každý druhý snímek).
+Na všech pěti postavách to vybere vizuálně lepší variantu; ověřeno naostro na
+foto 1 (MIA 1,196 proti šabloně 1,332, 29 s) a Test Knightovi (šablona 1,234
+proti MIA 1,611, 17 s). Nejhorší hrany (p99,9) nerozhodují — u MIA je dělá
+blána mezi rukou a bokem a vybíraly by šablonu i tam, kde vypadá hůř.
 
 Známé: s MIA rigem chodidla zajíždějí 9–13 cm pod zem (výška boků se škáluje
 výškou kostry, ne délkou nohou).

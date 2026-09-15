@@ -58,7 +58,8 @@ services:
       - FC_COMFY_URL=${FC_COMFY_URL:-}
       - FC_WORKFLOW_DIR=/app/workflows
       - FC_PREVIEW=${FC_PREVIEW:-thumb}
-      - FC_RIG=${FC_RIG:-template}
+      - FC_RIG=${FC_RIG:-auto}
+      - FC_RIG_MIA_TIMEOUT=${FC_RIG_MIA_TIMEOUT:-300}
     volumes:
       - ${DATA_DIR:?set DATA_DIR in .env}:/data
     networks: [ugc]

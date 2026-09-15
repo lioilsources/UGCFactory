@@ -254,3 +254,105 @@ class TestInputKeyByNode(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChooseRig(unittest.TestCase):
+    """Auto rezim bere rig s mensim natazenim hran; na peti postavach tim
+    vyhrala MIA u fotek cele postavy a sablona u rytire a orezanych postav."""
+
+    def test_lower_stretch_wins(self):
+        c = {"template": {"score": {"stretch_mean": 1.33}}, "mia": {"score": {"stretch_mean": 1.20}}}
+        self.assertEqual(fc_worker.choose_rig(c), "mia")
+        c["template"]["score"]["stretch_mean"] = 1.23
+        c["mia"]["score"]["stretch_mean"] = 1.59
+        self.assertEqual(fc_worker.choose_rig(c), "template")
+
+    def test_tie_goes_to_template(self):
+        c = {"mia": {"score": {"stretch_mean": 1.3}}, "template": {"score": {"stretch_mean": 1.3}}}
+        self.assertEqual(fc_worker.choose_rig(c), "template")
+
+    def test_failed_rig_never_wins(self):
+        c = {"template": {"score": {"stretch_mean": 1.9}}, "mia": {"error": "ComfyUI nedobehl"}}
+        self.assertEqual(fc_worker.choose_rig(c), "template")
+
+    def test_scored_beats_unscored(self):
+        c = {"template": {"score_error": "retarget selhal"}, "mia": {"score": {"stretch_mean": 1.5}}}
+        self.assertEqual(fc_worker.choose_rig(c), "mia")
+
+    def test_nothing_scored_prefers_template(self):
+        self.assertEqual(fc_worker.choose_rig({"template": {}, "mia": {}}), "template")
+
+    def test_all_failed_is_none(self):
+        self.assertIsNone(fc_worker.choose_rig({"template": {"error": "x"}, "mia": {"error": "y"}}))
+
+
+class TestStepRigAuto(unittest.TestCase):
+    """Orchestrace auto rezimu bez Blenderu a ComfyUI: stavebni kroky jsou
+    nahrazene a zapisuji jen soubory, ktere by zapsaly skutecne skripty."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.claim = {"dir": self.dir, "character": {"id": "c1"},
+                      "files": {"clean_glb": "clean.glb", "rigged_fbx": "rigged.fbx"},
+                      "clips": [{"id": "zombie_walk", "fbx_path": "/data/animlib/Zombie Walk.fbx"}]}
+        self.saved = {n: getattr(fc_worker, n) for n in ("rig_template", "rig_mia", "score_rig", "RIG_MODE")}
+        fc_worker.RIG_MODE = "auto"
+
+    def tearDown(self):
+        for n, v in self.saved.items():
+            setattr(fc_worker, n, v)
+
+    def fake_builder(self, tag, fail=None):
+        def build(claim, out, *timeout):
+            if fail:
+                raise RuntimeError(fail)
+            with open(os.path.join(out, "rigged.fbx"), "w") as f:
+                f.write(tag)
+            with open(os.path.join(out, "rig_report.json"), "w") as f:
+                json.dump({"weights": tag}, f)
+            return {"weights": tag}
+        return build
+
+    def run_rig(self, scores):
+        fc_worker.score_rig = lambda claim, out, clip: {"stretch_mean": scores[os.path.basename(out)]}
+        result = fc_worker.step_rig(self.claim)
+        with open(os.path.join(self.dir, "rigged.fbx")) as f:
+            fbx = f.read()
+        with open(os.path.join(self.dir, "rig_report.json")) as f:
+            report = json.load(f)
+        return result, fbx, report
+
+    def test_better_scoring_rig_is_installed(self):
+        fc_worker.rig_template = self.fake_builder("heat")
+        fc_worker.rig_mia = self.fake_builder("mia")
+        _, fbx, report = self.run_rig({"rig_template": 1.33, "rig_mia": 1.20})
+        self.assertEqual(fbx, "mia")
+        self.assertEqual(report["rig_choice"], "mia")
+        self.assertEqual(report["weights"], "mia")
+        self.assertEqual(report["rig_clip"], "zombie_walk")
+        self.assertEqual(report["rig_scores"]["template"]["stretch_mean"], 1.33)
+
+    def test_mia_failure_falls_back_to_template(self):
+        fc_worker.rig_template = self.fake_builder("heat")
+        fc_worker.rig_mia = self.fake_builder("mia", fail="MIALoadModel: NodeOutput is not JSON serializable")
+        result, fbx, report = self.run_rig({"rig_template": 1.9})
+        self.assertEqual(fbx, "heat")
+        self.assertEqual(report["rig_choice"], "template")
+        self.assertIn("NodeOutput", report["rig_scores"]["mia"]["error"])
+        self.assertEqual(result["artifacts"]["rigged_fbx"], os.path.join(self.dir, "rigged.fbx"))
+
+    def test_without_clips_template_is_kept(self):
+        self.claim["clips"] = []
+        fc_worker.rig_template = self.fake_builder("heat")
+        fc_worker.rig_mia = self.fake_builder("mia")
+        fc_worker.score_rig = lambda *a: self.fail("bez klipu se nema merit")
+        fc_worker.step_rig(self.claim)
+        with open(os.path.join(self.dir, "rigged.fbx")) as f:
+            self.assertEqual(f.read(), "heat")
+
+    def test_both_failing_fails_the_step(self):
+        fc_worker.rig_template = self.fake_builder("heat", fail="mesh na sablonu nesedi")
+        fc_worker.rig_mia = self.fake_builder("mia", fail="ComfyUI nedobehl")
+        with self.assertRaises(RuntimeError) as ctx:
+            fc_worker.step_rig(self.claim)
+        self.assertIn("ComfyUI nedobehl", str(ctx.exception))
