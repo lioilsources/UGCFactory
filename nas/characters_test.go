@@ -305,3 +305,31 @@ func TestExportStepClosesExportRow(t *testing.T) {
 		t.Fatalf("status after export %q, want done", c.Status)
 	}
 }
+
+// TestCharacterFileIsRevalidated: re-animating rewrites model.glb under the same
+// URL, so the app must ask again instead of showing a cached model.
+func TestCharacterFileIsRevalidated(t *testing.T) {
+	_, mux := newTestServer(t)
+	addAnimation(t, mux, "idle_01")
+	c := createCharacter(t, mux, "idle_01")
+
+	rec := do(t, mux, "GET", "/v1/fc/characters/"+c.ID+"/file/source_image", nil, "")
+	if rec.Code != 200 {
+		t.Fatalf("file: %d %s", rec.Code, rec.Body)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control %q, want no-cache", got)
+	}
+	lastMod := rec.Header().Get("Last-Modified")
+	if lastMod == "" {
+		t.Fatal("no Last-Modified: revalidation would download the file every time")
+	}
+
+	req := httptest.NewRequest("GET", "/v1/fc/characters/"+c.ID+"/file/source_image", nil)
+	req.Header.Set("If-Modified-Since", lastMod)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("unchanged file: %d, want 304", rec.Code)
+	}
+}

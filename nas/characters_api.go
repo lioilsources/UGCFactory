@@ -223,6 +223,11 @@ func (s *Server) handleFCFile(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusNotFound, "unknown artifact %q", r.PathValue("artifact"))
 		return
 	}
+	// Adresa se nemeni, kdyz se model prepocita (nove klipy, oprava retargetu),
+	// a bez Cache-Control si WebView a prohlizec drzi starou verzi podle
+	// heuristiky z Last-Modified. no-cache vynuti dotaz; nezmeneny soubor
+	// odejde jako 304 podle Last-Modified, takze to nic nestoji.
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, filepath.Join(s.charDir(c.ID), name))
 }
 
