@@ -28,6 +28,7 @@ import os
 import sys
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 GAP_FRAMES = 5          # mezera mezi klipy, at posledni snimek nepretece do dalsiho
@@ -120,10 +121,9 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
     snimku ma cilova kost svetovou rotaci S(f) * C. Kost pak miri tam, kam
     ve zdroji, at je jeji klidova poza nebo natoceni jakekoli.
 
-    Boky nesou i vysku: posun boku oproti klidu se prenese ve svete,
-    zmenseny pomerem vysek kostry. S in_place se zahodi vodorovna slozka,
-    houpani nahoru a dolu zustane - bez nej chodidla pri chuzi zajizdela
-    pod zem a vyletovala nad ni. Vraci (action, rozsah houpani v m)."""
+    Boky nesou i vysku, a ta se dopocita z chodidel (viz smycka nize), ne z
+    pohybu boku zdroje. S in_place se zahodi vodorovna slozka. Vraci (action,
+    rozsah zdvihu boku v m, pomer delek nohou)."""
     bones = hierarchy_order(target)
     src_bones = {pb.name: pb for pb in src.pose.bones}
     src_rot_w = rotation_of(src.matrix_world)
@@ -141,6 +141,11 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
         correction[b.name] = s_rest.inverted() @ align @ t_rest
 
     hips_rest_w = src.matrix_world @ src.data.bones[HIPS_BONE].head_local
+    src_feet, tgt_feet = foot_bones(src), foot_bones(target)
+    src_floor = rest_lowest(src, src_feet)
+    tgt_floor = rest_lowest(target, tgt_feet)
+    src_leg, tgt_leg = leg_length(src), leg_length(target)
+    leg_ratio = tgt_leg / src_leg if src_leg > 0 and tgt_leg > 0 else 1.0
 
     action = bpy.data.actions.new(clip_id)
     action.use_fake_user = True
@@ -149,8 +154,9 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
     keys = {b.name: [] for b in bones}
     hips_keys, previous, bob = [], {}, []
 
-    for frame in range(start, end + 1):
-        scene.frame_set(frame)
+    def pose(lift):
+        """Armaturni matice vsech kosti cile v aktualnim snimku; boky navic
+        posunute o `lift` metru nahoru."""
         posed = {}
         for b in bones:
             if b.parent is None:
@@ -166,12 +172,30 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
             if b.name == HIPS_BONE:
                 delta_w = (src.matrix_world @ src_bones[HIPS_BONE].head) - hips_rest_w
                 delta_w *= translation_scale
+                delta_w.z = lift
                 if in_place:
                     delta_w.x = delta_w.y = 0.0
-                bob.append(delta_w.z)
                 loc += tgt_rot_w_inv @ delta_w
             posed[b.name] = Matrix.LocRotScale(loc, rot, None)
-            basis = base.inverted() @ posed[b.name]
+            posed["__base__" + b.name] = base
+        return posed
+
+    for frame in range(start, end + 1):
+        scene.frame_set(frame)
+        # Vyska boku: nejdriv poza s boky v klidove vysce, pak se boky zvednou
+        # tak, aby nejnizsi bod chodidel byl nad zemi tolik, co ve zdroji
+        # (prepocteno delkou nohou). Vsechno pod boky se posune s nimi, takze
+        # jeden posun je presny pro jakoukoli kostru - na rozdil od pomeru
+        # vysek koster, se kterym MIA postavy zajizdely 9-13 cm pod zem.
+        probe = pose(0.0)
+        src_low = min((src.matrix_world @ getattr(src_bones[n], end_)).z
+                      for n in src_feet for end_ in ("head", "tail"))
+        tgt_low = posed_lowest(target, probe, tgt_feet)
+        lift = tgt_floor + (src_low - src_floor) * leg_ratio - tgt_low
+        posed = pose(lift)
+        bob.append(lift)
+        for b in bones:
+            basis = posed["__base__" + b.name].inverted() @ posed[b.name]
             q = basis.to_quaternion()
             if b.name in previous:
                 q.make_compatible(previous[b.name])  # bez skoku znamenka mezi snimky
@@ -185,7 +209,118 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
     write_curves(action, HIPS_BONE, "location", hips_keys, 3)
     for b in target.pose.bones:
         b.rotation_mode = "QUATERNION"
-    return action, (round(max(bob) - min(bob), 3) if bob else 0.0)
+    floor_fix = keep_mesh_above_floor(target, action, start, end)
+    return (action, (round(max(bob) - min(bob), 3) if bob else 0.0), round(leg_ratio, 4),
+            floor_fix)
+
+
+def keep_mesh_above_floor(target, action, start, end):
+    """Zvedne boky ve snimcich, kde mesh zajede pod klidovou uroven zeme.
+
+    Vyska boku podle kosti chodidel (bake_clip) nestaci: podrazka lezi pod
+    kostmi, a kdyz se spicka pri kroku odvali, otoci se podrazka pod ne.
+    U MIA rigu foto 1 tak mesh zajizdel 8,7 cm pod zem i s presnou vyskou
+    kosti (drive 13,6 cm). Zvedani je jen nahoru: skok ma dal od zeme
+    odlepit. Boky nesou vse, takze posun o dz zvedne cely mesh presne o dz.
+    Vraci nejvetsi pouzity zdvih v metrech."""
+    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"
+              and any(m.type == "ARMATURE" and m.object == target for m in o.modifiers)]
+    if not meshes:
+        return 0.0
+
+    def world_z(obj, mesh):
+        n = len(mesh.vertices)
+        co = np.empty(n * 3, dtype=np.float64)
+        mesh.vertices.foreach_get("co", co)
+        m = np.array(obj.matrix_world)
+        return co.reshape(n, 3) @ m[2, :3] + m[2, 3]
+
+    floor = min(float(world_z(o, o.data).min()) for o in meshes)
+    if target.animation_data is None:
+        target.animation_data_create()
+    previous = target.animation_data.action
+    target.animation_data.action = action
+    scene = bpy.context.scene
+    lifts = {}
+    for frame in range(start, end + 1):
+        scene.frame_set(frame)
+        dg = bpy.context.evaluated_depsgraph_get()
+        low = None
+        for o in meshes:
+            ev = o.evaluated_get(dg)
+            me = ev.to_mesh()
+            z = float(world_z(ev, me).min())
+            ev.to_mesh_clear()
+            low = z if low is None else min(low, z)
+        if low is not None and low < floor:
+            lifts[frame] = floor - low
+    target.animation_data.action = previous
+    if not lifts:
+        return 0.0
+
+    # zdvih ve svete -> posun v lokalnich osach boku (klidova matice korene)
+    hips = target.data.bones[HIPS_BONE]
+    to_local = hips.matrix_local.to_3x3().inverted() @ target.matrix_world.to_3x3().inverted()
+    path = f'pose.bones["{HIPS_BONE}"].location'
+    curves = {fc.array_index: fc for fc in action.fcurves if fc.data_path == path}
+    for frame, dz in lifts.items():
+        delta = to_local @ Vector((0.0, 0.0, dz))
+        for axis, fc in curves.items():
+            for kp in fc.keyframe_points:
+                if int(round(kp.co.x)) == frame:
+                    kp.co.y += delta[axis]
+                    kp.handle_left.y += delta[axis]
+                    kp.handle_right.y += delta[axis]
+    for fc in curves.values():
+        fc.update()
+    return round(max(lifts.values()), 3)
+
+
+def foot_bones(arm):
+    """Kosti, podle kterych se meri vyska chodidel: Foot a ToeBase obou stran,
+    kde chybi (fixture), aspon konec Leg."""
+    names = []
+    for side in ("Left", "Right"):
+        found = [f"{MIXAMO_PREFIX}:{side}{part}" for part in ("Foot", "ToeBase")
+                 if f"{MIXAMO_PREFIX}:{side}{part}" in arm.data.bones]
+        if not found and f"{MIXAMO_PREFIX}:{side}Leg" in arm.data.bones:
+            found = [f"{MIXAMO_PREFIX}:{side}Leg"]
+        names += found
+    if not names:
+        raise RuntimeError(f"kostra {arm.name} nema nohy - nejde urcit vysku boku")
+    return names
+
+
+def rest_lowest(arm, names):
+    mw = arm.matrix_world
+    return min(min((mw @ arm.data.bones[n].head_local).z, (mw @ arm.data.bones[n].tail_local).z)
+               for n in names)
+
+
+def posed_lowest(arm, posed, names):
+    """Nejnizsi hlava nebo konec kosti v poze spocitane v bake_clip."""
+    mw = arm.matrix_world
+    low = None
+    for n in names:
+        m = posed[n]
+        for p in (m.translation, m @ Vector((0.0, arm.data.bones[n].length, 0.0))):
+            z = (mw @ p).z
+            low = z if low is None else min(low, z)
+    return low
+
+
+def leg_length(arm):
+    """Prumerna delka stehna a holene ve svete - meritko pro vysku kroku."""
+    mw = arm.matrix_world
+    lengths = []
+    for side in ("Left", "Right"):
+        up = arm.data.bones.get(f"{MIXAMO_PREFIX}:{side}UpLeg")
+        low = arm.data.bones.get(f"{MIXAMO_PREFIX}:{side}Leg")
+        if up is None or low is None:
+            continue
+        lengths.append((mw @ up.tail_local - mw @ up.head_local).length
+                       + (mw @ low.tail_local - mw @ low.head_local).length)
+    return sum(lengths) / len(lengths) if lengths else 0.0
 
 
 def write_curves(action, bone, prop, frames, width):
@@ -235,7 +370,7 @@ def main():
     # Obe cilove hry si pohyb postavy ridi samy, takze klip ma animovat na
     # miste. Vypnout jde per job pro pripad, ze by nekdo root motion chtel.
     in_place = job.get("in_place", True)
-    ranges, missing, ratios, bobs = {}, {}, {}, {}
+    ranges, missing, ratios, bobs, leg_ratios, floor_fixes = {}, {}, {}, {}, {}, {}
     cursor = 1
     for clip in job["clips"]:
         clip_id = clip["id"]
@@ -257,7 +392,7 @@ def main():
         gap = bones_in_action(src_action) - target_bones
         if gap:
             missing[clip_id] = sorted(gap)[:8]
-        action, bobs[clip_id] = bake_clip(
+        action, bobs[clip_id], leg_ratios[clip_id], floor_fixes[clip_id] = bake_clip(
             target, src, clip_id, ratio * float(clip.get("location_scale", 1.0)), in_place)
 
         for o in objs:
@@ -302,6 +437,8 @@ def main():
         "in_place": in_place,
         "retarget": "world_axes",
         "hips_bob_m": bobs,
+        "leg_ratio": leg_ratios,
+        "floor_fix_m": floor_fixes,
         "blend": os.path.basename(blend_path),
     }
     with open(os.path.join(out_dir, "retarget_ranges.json"), "w") as f:

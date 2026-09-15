@@ -482,5 +482,20 @@ foto 1 (MIA 1,196 proti šabloně 1,332, 29 s) a Test Knightovi (šablona 1,234
 proti MIA 1,611, 17 s). Nejhorší hrany (p99,9) nerozhodují — u MIA je dělá
 blána mezi rukou a bokem a vybíraly by šablonu i tam, kde vypadá hůř.
 
-Známé: s MIA rigem chodidla zajíždějí 9–13 cm pod zem (výška boků se škáluje
-výškou kostry, ne délkou nohou).
+Produkční ComfyUI restartováno 2026-09-15 18:01 a všech pět postav přepočteno
+od `char.rig` (4 min): MIA vybrána u foto 1 (1,201 proti 1,332), šablona u
+ostatních. Foto 2 vyšlo tentokrát pro MIA hůř než v testu (1,421 proti 1,334)
+— MIA není mezi běhy deterministická, rozhoduje aktuální běh.
+
+### Chodidla na zemi
+
+S MIA rigem mesh zajížděl 9–14 cm pod zem po celý klip. Výška boků se brala
+jako pohyb boků zdroje × poměr výšek koster, a to u kostry jiných proporcí
+nesedí. Nově `bake_clip` v každém snímku postaví pózu s boky v klidové výšce,
+změří nejnižší kost chodidla a boky posune tak, aby byla nad zemí jako ve
+zdroji (× poměr délek nohou). To samo zlepšilo foto 1 jen na −8,7 cm: podrážka
+leží pod kostmi a při odvalení špičky se pod ně otočí. `keep_mesh_above_floor`
+proto po upečení projde snímky a kde skinovaný mesh klesne pod klidovou zem,
+zvedne boky o rozdíl — jen nahoru, aby skok dál mohl od země odlétnout.
+Výsledek: nejnižší bod meshe 0,0 cm ve všech snímcích u MIA i šablony,
+natažení beze změny, retarget 2–3 s.
