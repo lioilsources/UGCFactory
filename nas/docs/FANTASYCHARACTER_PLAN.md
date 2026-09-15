@@ -499,3 +499,79 @@ proto po upečení projde snímky a kde skinovaný mesh klesne pod klidovou zem,
 zvedne boky o rozdíl — jen nahoru, aby skok dál mohl od země odlétnout.
 Výsledek: nejnižší bod meshe 0,0 cm ve všech snímcích u MIA i šablony,
 natažení beze změny, retarget 2–3 s.
+
+## 14. A-pose a domyšlení nohou před TRELLISem (měřeno 2026-09-15)
+
+Checkbox „Auto A-pose" v appce slibuje překreslení do A-pózy, ale
+`fc_preprocess.json` dělá jen RMBG. Skutečný problém, který by A-pose měla
+řešit, jsou **srostlé končetiny**: ruce přitisknuté k tělu a stehna u sebe
+TRELLIS slije do jednoho objemu, šablona pak paži v řezech nenajde, MIA nechá
+ruce u boků bez vah a při chůzi vzniká blána mezi stehny. Druhý problém jsou
+fotky oříznuté nad kotníky — rig má nohy, mesh ne.
+
+Vyzkoušeno na ComfyUI na Sparku (vše už tam bylo, žádné stahování), skript
+`fc_pose_exp.py` (scratch, není v repu), metriky z DWPose (`DWPreprocessor` +
+`SavePoseKpsAsJsonFile`): úhel paže od svislice, vodorovná mezera zápěstí od
+osy trupu a rozteč kotníků/kolen, vše v šířkách ramen; tvář ArcFace
+(`video-stack/tools/face_drift.py`) proti vstupu.
+
+### Domyšlení nohou: FLUX Fill outpaint funguje
+
+`ImagePadForOutpaint` (bottom = boky + 2,2 × trup − výška, zaokrouhleno na 16,
+feathering 40) → `InpaintModelConditioning` → FLUX Fill fp8, guidance 30,
+28 kroků, ~80–130 s. Prompt: „Continue the same figure downward, seamlessly:
+the legs of the same person in the same clothing and the same art style,
+standing straight and facing the camera, feet shoulder-width apart, matching
+shoes, on a plain flat floor, consistent lighting." Ilustrace oříznutá nad
+kotníky i malba oříznutá v bocích dostaly nohy ve stejném stylu, kotníky
+detekované; viditelná část zůstala pixel-přesně (tvář 0,99). „Feet
+shoulder-width apart" model poslouchá jen někdy: malba kolena 1,0–1,1, ilustrace
+0,25 (stehna u sebe).
+
+### A-pose: FLUX Kontext s podrobným promptem odtáhne paže, nohy ne
+
+Graf z Ol1nLLM (`flux_hair_kontext.api.json` bez masky), guidance 2,5,
+28 kroků, ~90–240 s podle vytížení. Prompt rozhoduje:
+
+| | paže (°) | zápěstí od osy | tvář |
+|---|---|---|---|
+| foto 2 vstup | 3 | 0,54 | — |
+| p1 podrobný („keep this exact person… arms at about 35 degrees, palms open, feet shoulder-width apart") | 19–20 | 1,03–1,09 | **0,96** |
+| p2 krátký („same person… A-pose") | 21–22 | 1,02–1,07 | 0,72–0,73 |
+
+Podrobný prompt drží identitu (0,96 = prakticky nezměněná tvář), oblečení
+i pozadí; krátký ji sráží. U rytíře 15° → 19–27°, kotníky 0,81 → 0,99–1,52.
+Nohy od sebe ale Kontext spolehlivě nedá: u ilustrace po outpaintu nechal
+kolena na 0,17 a tvář překreslil (0,41 proti outpaintu).
+
+### Brána: kostra na výsledku (auto rig, Zombie Walk, stejná metrika jako §13)
+
+| postava | vstup | jen outpaint | Kontext p1 | outpaint + Kontext |
+|---|---|---|---|---|
+| foto 2 | 1,370 | — | **1,286** | — |
+| Test Knight | 1,234 | — | **1,167** | — |
+| malba (trup) | 1,346 | **1,206** (MIA) | — | 1,318 |
+| ilustrace (nad kotníky) | 1,467 | 1,531 | — | 1,567 |
+
+Vizuálně (render animace): u foto 2 a rytíře se paže po Kontextu oddělily a
+kývou samostatně místo blány přes trup; malba z plovoucího torza tančí celá.
+Čísla ilustrace jsou pastí metriky, ne důkazem zhoršení: bez nohou se natažení
+počítá na meshi, který nohy nemá, s domyšlenýma nohama u sebe přibude přesně ta
+blána mezi stehny. Kontext na malbě skóre zhoršil (1,206 → 1,318) — jeden běh,
+TRELLIS i MIA jsou mezi běhy nedeterministické, rozdíly kolem 0,1 jsou na hraně
+šumu (foto 2 MIA vyšla 1,33 a 1,42 ze stejného vstupu).
+
+### Co z toho plyne
+
+- Outpaint nasadit, když DWPose nevidí kotníky — bez něj postava nemá nohy vůbec.
+- Kontext p1 nasadit, když je zápěstí blíž než ~0,8 šířky ramen od osy trupu
+  (foto 2 0,54, malba 0,56; rytíř 0,81 byl už na hraně). Na fotkách drží
+  identitu, na ilustracích ji mění — gate podle tváře (ArcFace < 0,7 → vrátit
+  vstup) se nabízí, ale u malby/rytíře tvář není a rozhodnout nejde.
+- Stehna u sebe zůstávají otevřená: ani Fill, ani Kontext je spolehlivě
+  nerozdělí. Kandidát je VACE s řídicí kostrou (§ „A-pose" výše v rozhovoru
+  2026-09-15) nebo cílený inpaint mezery mezi stehny.
+- Cena: +2 až +6 min na postavu na sdíleném GPU.
+
+Testovací postavy `owner=poseexp` na NASu (6 ks) a výstupy v
+`~/Code/ComfyUI/output/fc_exp/` na Sparku zůstaly pro srovnání.
