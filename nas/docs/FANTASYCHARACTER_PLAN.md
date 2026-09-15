@@ -404,3 +404,80 @@ váhy na vrchol s tím nehnulo (4,86 → 4,76).
 Proto je metoda přepínatelná přes `FC_RIG_WEIGHTS` (`auto` | `proxy` |
 `envelope`), ne zadrátovaná. Rozhodnout to podle čísel nejde, obě metriky
 mluví proti sobě.
+
+## 13. Animace na fotkách: retarget, šablona po řezech a MIA (měřeno 2026-09-15)
+
+Celopostavové fotky dávaly dobrý mesh — výstup TRELLISu, cleanup i rig
+v klidové póze vypadají v pořádku — a pak se postava v Zombie Walku
+přeložila v pase. Měřeno na pěti postavách: dvě fotky celé postavy, Test
+Knight, ilustrace oříznutá pod boky a obraz trupu. Metrika je natažení hran
+během klipu (`max(r, 1/r)`, průměr přes hrany a snímky; 1,0 = žádná
+deformace), vždy se stejným klipem.
+
+### Retarget: světové osy místo kopie Action
+
+`fc_retarget.py` kopíroval lokální rotace 1:1. Šablona má ale nohy a klíční
+kosti otočené o 180° kolem vlastní osy a paže v klidu dolů místo T-pózy, takže
+stehno bylo proti zdroji průměrně 66° mimo, nejvíc 116°. Po přepočtu přes
+světové osy (`bake_clip`) je každá kost ve směru zdroje na 0,0° a chodidla do
+3 cm od země (dřív až 18 cm nad). Nasazeno, commit 3df9f4f.
+
+Zkoušeno a vráceno: srovnávat směr jen u kostí s velkým rozdílem klidové pózy
+(práh 15–35°) a výšku boků škálovat délkou nohou. Obojí vyšlo na všech pěti
+postavách o kus hůř (např. foto 1 1,332 → 1,347) a chodidla se vznášela o 4–6 cm
+— UpLeg hlava sedí u sablony ve výšce Hips, u Mixamo níž, a vzorec to nebral.
+
+### Šablona po řezech: nenasazeno
+
+Kosti šablony leží v jedné rovině uprostřed bboxu. Na fotce, kde ruce visí
+kousek za tělem, pak paže meshe leží 14 cm za kostí a 10 cm vedle a v animaci
+odlétá do stran. Zkoušeno: mesh posypat 150 k body, řezat po 1 % výšky, klouby
+dát do středu shluků (paže sledovat shora, nohy od stehen dolů, páteř jako
+přímka). Průměrné natažení (stejný retarget):
+
+| postava | šablona | řezy (vše) | řezy (jen paže) | MIA |
+|---|---|---|---|---|
+| foto 1 | 1,332 | 1,258 | 1,281 | **1,200** |
+| foto 2 (ruce za zády) | 1,370 | 1,376 | 1,411 | **1,334** |
+| Test Knight | **1,234** | 1,389 | 1,416 | 1,587 |
+| ilustrace bez nohou | **1,467** | 1,312* | 1,458 | 1,994 |
+| obraz trupu | **1,345** | 1,359 | 1,347 | 1,735 |
+
+\* s vodorovnými pažemi, vizuálně nesmysl.
+
+Paže po řezech sedí líp (u foto 1 přestaly odlétat), ale jinde to škodí víc:
+u rytíře řez v úrovni kolen bere plášť a kolena jdou cik-cak, páteř podle
+chocholu a drdolů zkroutila hlavu. Šablona zůstala, jak byla; pokus není v repu.
+
+### MIA: běží, ale jen pro celé postavy
+
+`FC_RIG=comfy` padal na `MIALoadModel`: *Object of type NodeOutput is not JSON
+serializable*. Tři příčiny za sebou a oprava na Sparku:
+
+- `comfy-env` 0.2.11, UniRig pinuje 0.4.1: `.venv/bin/pip install comfy-env==0.4.1`
+- 0.4.1 hledá prostředí v `~/.ce/envs/unirig-nodes` a pixi v `~/.pixi/bin`:
+  symlink na staré `~/.ce/_env_cfd2fa/.pixi/envs/default` + `pixi.toml/lock`,
+  `ln -s ~/.local/bin/pixi ~/.pixi/bin/pixi` (`comfy-env install` ne — bral by
+  `bpy` z kanálu bez aarch64 buildu)
+- v izolovaném Pythonu 3.13 chyběl `torch_cluster`: build s
+  `TORCH_CUDA_ARCH_LIST=12.1 FORCE_CUDA=1`, log v
+  `custom_nodes/ComfyUI-UniRig/torch_cluster_py313_build.log`
+
+Produkční ComfyUI opravu převezme až po restartu (`systemctl --user restart
+comfyui`), a to jen s prázdnou frontou — sdílí ho i jiní klienti.
+
+`fc_rig.json` navíc nešel spustit vůbec (commit a154434) a surový výstup MIA
+nejde rovnou dál; `fc_rig_mia.py` ho srovná: mesh má výšku 2 a střed v počátku
+(→ rozměry `clean.glb`), 7 % vrcholů je bez váhy (→ váhy nejbližšího
+váženého, jinak nejhorší hrana 75×), až 8 vah na vrchol (→ 4) a materiál je
+poloprůhledný (→ materiál z `clean.glb`).
+
+Z tabulky: MIA vyhrává u fotek celé postavy a v renderu je jediná, která
+vypadá jako reference (ruce vpředu, pokrčená kolena). U brnění s pláštěm,
+oříznutých postav a malby je výrazně horší — plášť roztáhne do křídel.
+Výchozí proto zůstává `template`; `FC_RIG=comfy` je volba. Nabízí se `auto`:
+rig oběma, stejný klip, vzít nižší natažení — na všech pěti postavách by to
+vybralo vizuálně lepší variantu.
+
+Známé: s MIA rigem chodidla zajíždějí 9–13 cm pod zem (výška boků se škáluje
+výškou kostry, ne délkou nohou).

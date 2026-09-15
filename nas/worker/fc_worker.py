@@ -32,9 +32,9 @@ COMFY_TIMEOUT = int(os.environ.get("FC_COMFY_TIMEOUT", "1800"))
 # na 48 snimku (Cycles CPU, GPU tu neni), takze by drzel workera kvuli videu,
 # ktere je jen pohodli. Na 'full' prepnout, az bude render na Sparku.
 PREVIEW_MODE = os.environ.get("FC_PREVIEW", "thumb")
-# template | comfy. Vychozi je sablona v Blenderu na JODA, protoze ani UniRig,
-# ani MIA na GB10 nerozbehneme (viz FANTASYCHARACTER_PLAN.md 12). Na 'comfy'
-# se prepne, az nekdo z tech upstreamu Blackwell doplni.
+# template | comfy. 'comfy' = MIA v ComfyUI na Sparku; bezi od 2026-09-15 (comfy-env
+# 0.4.1, torch_cluster pro izolovany Python 3.13, viz FANTASYCHARACTER_PLAN.md 13)
+# a deformuje lip nez sablona v Blenderu na JODA.
 RIG_MODE = os.environ.get("FC_RIG", "template")
 
 # Kazdy ComfyUI krok ma vlastni workflow; fc_pipeline.json je fallback pro
@@ -328,9 +328,19 @@ def step_clean(claim):
 def step_rig(claim):
     d, files = claim["dir"], claim["files"]
     if RIG_MODE == "comfy":
-        out = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"])), ".fbx"),
-                          os.path.join(d, files["rigged_fbx"]))
-        return {"artifacts": {"rigged_fbx": out}}
+        # MIA vraci mesh ve svem normalizovanem meritku a cast vrcholu bez vahy;
+        # fc_rig_mia.py z toho udela rigged.fbx stejneho tvaru jako sablona.
+        raw = comfy_fetch(pick_output(comfy_run("char.rig", os.path.join(d, files["clean_glb"])), ".fbx"),
+                          os.path.join(d, "rigged_mia_raw.fbx"))
+        report = run_blender("fc_rig_mia.py", {
+            "id": claim["character"]["id"],
+            "fbx": raw,
+            "clean_glb": os.path.join(d, files["clean_glb"]),
+            "out_dir": d,
+        })
+        for w in report.get("fit_warnings", []):
+            print(f"  rig varovani: {w}", flush=True)
+        return {"artifacts": {"rigged_fbx": os.path.join(d, files["rigged_fbx"])}}
 
     report = run_blender("fc_rig_template.py", {
         "id": claim["character"]["id"],

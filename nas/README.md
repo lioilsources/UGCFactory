@@ -114,7 +114,7 @@ headless Blender na JODA:
 | `char.preprocess` | Spark | ComfyUI `fc_preprocess.json` (RMBG + volitelná A-pose) |
 | `char.mesh` | Spark | ComfyUI `fc_mesh.json` (TRELLIS) |
 | `char.clean` | JODA | `fc_cleanup.py` — decimate, atlas, výška 1.8 m, pivot na zem |
-| `char.rig` | **JODA** | `fc_rig_template.py` — Mixamo kostra z proporcí meshe, heat map váhy |
+| `char.rig` | **JODA** / Spark | `fc_rig_template.py` — Mixamo kostra z proporcí meshe, heat map váhy; s `FC_RIG=comfy` MIA na Sparku + `fc_rig_mia.py` |
 | `char.animate` | JODA | `fc_retarget.py` — klipy na jednu timeline + NLA tracky |
 | `char.export.user` | JODA | `fc_export.py` — GLB, FBX, turntable mp4, thumb |
 | `char.export.roblox` | JODA | `fc_roblox_pack.py` — ≤10k tris, 4 váhy/vertex, ≤256 kostí |
@@ -132,7 +132,9 @@ Rig **nejede na neuronce**: ani UniRig, ani MIA se na GB10 rozběhnout nedají
 (`cumm` nezná CUDA arch 12.1, `bpy` nemá wheel pro linux aarch64 — měření je
 v `docs/FANTASYCHARACTER_PLAN.md` §12). `fc_rig_template.py` staví Mixamo
 kostru z proporcí meshe, takže klipy z knihovny na ni sedají stejně.
-`FC_RIG=comfy` přepne zpět, až některý z těch upstreamů Blackwell doplní.
+MIA od 2026-09-15 na Sparku běží (`FC_RIG=comfy`, oprava prostředí v plánu §13)
+a u fotek celé postavy deformuje líp, u brnění s pláštěm a oříznutých postav
+hůř — proto výchozí zůstává šablona.
 
 Workflow JSONy patří do `workflows/`, kontrakt (titulky nodů, ne čísla) je
 popsaný ve `workflows/README.md`. Bez `FC_COMFY_URL` selžou ComfyUI kroky hned
