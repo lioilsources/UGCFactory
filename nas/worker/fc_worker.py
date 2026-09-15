@@ -184,6 +184,7 @@ def comfy_run(step, image_path):
     if not COMFY:
         raise RuntimeError(f"{step}: FC_COMFY_URL neni nastavene")
     workflow, name = load_workflow(step)
+    unique_outputs(workflow, uuid.uuid4().hex[:12])
     if image_path:
         uploaded = comfy_upload(image_path)
         if not set_titled_source(workflow, TITLE_INPUT_IMAGE, uploaded):
@@ -202,6 +203,26 @@ def comfy_run(step, image_path):
                 return collect_outputs(entry.get("outputs", {})) + prefix_candidates(workflow)
         time.sleep(3)
     raise RuntimeError(f"{step}: ComfyUI nedobehl do {COMFY_TIMEOUT}s (prompt {prompt_id})")
+
+
+def unique_outputs(workflow, token):
+    """Da vystupum tohoto behu vlastni jmeno.
+
+    ComfyUI cisluje soubory pod jednim prefixem postupne (_00001_, _00002_,
+    ...), ale prefix_candidates umi odhadnout jen _00001_. Se sdilenym
+    "3D/fc_mesh" tak kazda dalsi postava stahla mesh prvni - druha fotka
+    dostala zase Test Knighta, ackoliv TRELLIS jeji mesh vyrobil spravne
+    jako fc_mesh_00002_.glb (2026-09-11). S unikatnim prefixem je _00001_
+    vzdy soubor tohoto behu, stejne jako u ugc-pipeline, ktera prefix
+    odvozuje z id jobu."""
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs") or {}
+        for key in ("filename_prefix", "fbx_name"):
+            value = inputs.get(key)
+            if isinstance(value, str) and value:
+                inputs[key] = f"{value}_{token}"
 
 
 def prefix_candidates(workflow):

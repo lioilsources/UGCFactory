@@ -202,6 +202,33 @@ class TestPrefixCandidates(unittest.TestCase):
         self.assertEqual(fc_worker.prefix_candidates(wf), [])
 
 
+class TestUniqueOutputs(unittest.TestCase):
+    """Se sdilenym prefixem ukazoval odhad _00001_ na vystup prvni postavy,
+    takze kazda dalsi fotka dostala jeji mesh."""
+
+    def test_each_run_guesses_its_own_file(self):
+        base = {"10": {"class_type": "Trellis2ExportMesh",
+                       "inputs": {"filename_prefix": "3D/fc_mesh", "file_format": "glb"}}}
+        guesses = []
+        for token in ("aaa", "bbb"):
+            wf = json.loads(json.dumps(base))
+            fc_worker.unique_outputs(wf, token)
+            guesses.append(fc_worker.prefix_candidates(wf)[0])
+        self.assertEqual(guesses[0], ("fc_mesh_aaa_00001_.glb", "3D", "output"))
+        self.assertNotEqual(guesses[0], guesses[1])
+
+    def test_mia_fbx_name_is_unique_too(self):
+        wf = {"3": {"class_type": "MIAAutoRig", "inputs": {"fbx_name": "fc_rig"}}}
+        fc_worker.unique_outputs(wf, "ccc")
+        self.assertIn(("fc_rig_ccc_mia.fbx", "", "output"), fc_worker.prefix_candidates(wf))
+
+    def test_leaves_other_inputs_alone(self):
+        wf = {"1": {"_meta": {"title": "FC_INPUT_IMAGE"}, "inputs": {"image": "x.png"}},
+              "2": "neni nod"}
+        fc_worker.unique_outputs(wf, "ddd")
+        self.assertEqual(wf["1"]["inputs"], {"image": "x.png"})
+
+
 class TestInputKeyByNode(unittest.TestCase):
     """Vstupni parametr se jmenuje podle nodu - LoadImage "image",
     UniRigLoadMesh "file_path". Titulek urcuje nod, ne parametr."""
