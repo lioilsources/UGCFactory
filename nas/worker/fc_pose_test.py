@@ -1,0 +1,193 @@
+"""Testy fc_pose.py bez ComfyUI - ciste funkce (metriky, brany, grafy).
+
+    python3 -m unittest discover -s worker -p 'fc_*_test.py'
+"""
+import struct
+import sys
+import os
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import fc_pose  # noqa: E402
+
+
+# Sablona 18 kloubu, vsechny s vysokou confidence: A-poza, kotniky videt.
+# Poradi: nos,krk,Rrameno,Rloket,Rzapesti,Lrameno,Lloket,Lzapesti,Rbok,Rkoleno,
+# Rkotnik,Lbok,Lkoleno,Lkotnik,Roko,Loko,Rucho,Lucho.
+def _apose_kps():
+    return [
+        (100, 20, 0.9),     # 0 nos
+        (100, 60, 0.9),     # 1 krk
+        (60, 65, 0.9),      # 2 R rameno
+        (30, 100, 0.9),     # 3 R loket
+        (10, 130, 0.9),     # 4 R zapesti (dale od osy - A-poza)
+        (140, 65, 0.9),     # 5 L rameno
+        (170, 100, 0.9),    # 6 L loket
+        (190, 130, 0.9),    # 7 L zapesti
+        (85, 220, 0.9),     # 8 R bok
+        (85, 320, 0.9),     # 9 R koleno
+        (85, 420, 0.9),     # 10 R kotnik
+        (115, 220, 0.9),    # 11 L bok
+        (115, 320, 0.9),    # 12 L koleno
+        (115, 420, 0.9),    # 13 L kotnik
+        (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0),
+    ]
+
+
+def _fused_kps():
+    """Ruce podel tela (zapesti skoro na ose trupu), kotniky pod ramem."""
+    kps = _apose_kps()
+    kps[4] = (78, 130, 0.9)    # R zapesti tesne u osy
+    kps[7] = (122, 130, 0.9)   # L zapesti tesne u osy
+    kps[10] = (0, 0, 0.05)     # kotniky neviditelne (pod ramem fotky)
+    kps[13] = (0, 0, 0.05)
+    return kps
+
+
+class TestPoseMetrics(unittest.TestCase):
+    def test_apose_has_wide_wrist_gap_and_visible_ankles(self):
+        m = fc_pose.pose_metrics(_apose_kps())
+        self.assertNotIn("error", m)
+        self.assertGreater(m["wrist_gap_min"], 0.85)
+        self.assertTrue(m["ankles_visible"])
+        self.assertFalse(fc_pose.needs_arm_reshape(m))
+        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+
+    def test_fused_arms_and_missing_ankles_trigger_both_gates(self):
+        m = fc_pose.pose_metrics(_fused_kps())
+        self.assertLess(m["wrist_gap_min"], fc_pose.ARM_GATE_WRIST_GAP)
+        self.assertFalse(m["ankles_visible"])
+        self.assertTrue(fc_pose.needs_arm_reshape(m))
+        self.assertTrue(fc_pose.needs_leg_outpaint(m))
+
+    def test_missing_hips_or_shoulders_is_an_error(self):
+        kps = _apose_kps()
+        kps[8] = (85, 220, 0.05)  # R bok pod prahem
+        m = fc_pose.pose_metrics(kps)
+        self.assertIn("error", m)
+        self.assertFalse(fc_pose.needs_arm_reshape(m))
+        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+
+    def test_one_arm_missing_still_gives_a_gap_from_the_other(self):
+        kps = _apose_kps()
+        kps[6] = (0, 0, 0.1)  # L loket chybi
+        kps[7] = (0, 0, 0.1)  # L zapesti chybi
+        m = fc_pose.pose_metrics(kps)
+        self.assertIn("wrist_gap_min", m)   # z prave paze
+
+
+class TestGates(unittest.TestCase):
+    def test_arm_gate_is_a_strict_less_than(self):
+        m = {"wrist_gap_min": fc_pose.ARM_GATE_WRIST_GAP}
+        self.assertFalse(fc_pose.needs_arm_reshape(m))
+        m["wrist_gap_min"] -= 0.01
+        self.assertTrue(fc_pose.needs_arm_reshape(m))
+
+    def test_error_metrics_never_trigger_either_gate(self):
+        m = {"error": "chybi ramena nebo boky"}
+        self.assertFalse(fc_pose.needs_arm_reshape(m))
+        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+
+
+class TestOutpaintBottom(unittest.TestCase):
+    def test_rounds_up_to_a_multiple_of_16(self):
+        # floor_y = hip_y(1000) + 2.2*torso(300) = 1660; vyska obrazku 1400
+        # -> chybi presne 260 px, zaokrouhlit nahoru na 16 = 272
+        px = fc_pose.outpaint_bottom_px({"hip_y": 1000.0, "torso": 300.0}, 1400)
+        self.assertEqual(px, 272)
+        self.assertEqual(px % 16, 0)
+
+    def test_floor_already_inside_the_image_needs_nothing(self):
+        px = fc_pose.outpaint_bottom_px({"hip_y": 500.0, "torso": 100.0}, 2000)
+        self.assertEqual(px, 0)
+
+
+class TestParseKeypoints(unittest.TestCase):
+    def _frame(self, canvas=(200, 400)):
+        cw, ch = canvas
+        flat = []
+        for i in range(18):
+            flat += [10.0 * i, 20.0 * i, 0.8]
+        return {"people": [{"pose_keypoints_2d": flat}], "canvas_width": cw, "canvas_height": ch}
+
+    def test_rescales_from_dwpose_canvas_to_real_pixels(self):
+        # DWPose canvas 200x400, skutecny obrazek 400x800 (2x vetsi) -> body 2x
+        kps = fc_pose.parse_pose_keypoints(self._frame((200, 400)), 400, 800)
+        self.assertEqual(len(kps), 18)
+        self.assertAlmostEqual(kps[1][0], 10.0 * 2)  # bod 1: x=10 -> 20
+        self.assertAlmostEqual(kps[1][1], 20.0 * 2)
+
+    def test_accepts_the_list_of_frames_wrapper_too(self):
+        kps = fc_pose.parse_pose_keypoints([self._frame()], 200, 400)
+        self.assertEqual(len(kps), 18)
+
+    def test_no_people_means_dwpose_found_nobody(self):
+        self.assertIsNone(fc_pose.parse_pose_keypoints({"people": [], "canvas_width": 1, "canvas_height": 1}, 1, 1))
+
+
+class TestImageSize(unittest.TestCase):
+    def _png_bytes(self, w, h):
+        sig = b"\x89PNG\r\n\x1a\n"
+        ihdr = struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", w, h) + bytes(5) + struct.pack(">I", 0)
+        return sig + ihdr
+
+    def _jpeg_bytes(self, w, h, with_app0=False):
+        sof0 = b"\xff\xc0" + b"\x00\x00\x08" + struct.pack(">HH", h, w)  # SOF0 uklada vysku pred sirkou
+        if not with_app0:
+            return b"\xff\xd8" + sof0
+        payload = b"JFIF" + bytes(9)
+        app0 = b"\xff\xe0" + struct.pack(">H", 2 + len(payload)) + payload
+        return b"\xff\xd8" + app0 + sof0
+
+    def test_png_dimensions(self):
+        path = _write(self._png_bytes(800, 600))
+        self.assertEqual(fc_pose.image_size(path), (800, 600))
+
+    def test_jpeg_dimensions(self):
+        path = _write(self._jpeg_bytes(1024, 768))
+        self.assertEqual(fc_pose.image_size(path), (1024, 768))
+
+    def test_jpeg_skips_segments_before_sof0(self):
+        path = _write(self._jpeg_bytes(640, 480, with_app0=True))
+        self.assertEqual(fc_pose.image_size(path), (640, 480))
+
+    def test_neither_png_nor_jpeg_raises(self):
+        path = _write(b"not an image")
+        with self.assertRaises(RuntimeError):
+            fc_pose.image_size(path)
+
+
+def _write(data):
+    import tempfile
+    fd, path = tempfile.mkstemp()
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
+
+
+class TestGraphs(unittest.TestCase):
+    def test_pose_graph_wires_the_uploaded_image_and_bbox(self):
+        g = fc_pose.pose_graph("fc/img.png", "fc/pose", bbox_detector="None")
+        self.assertEqual(g["1"]["inputs"]["image"], "fc/img.png")
+        self.assertEqual(g["2"]["class_type"], "DWPreprocessor")
+        self.assertEqual(g["2"]["inputs"]["bbox_detector"], "None")
+        self.assertEqual(g["3"]["class_type"], "SavePoseKpsAsJsonFile")
+        self.assertEqual(g["3"]["inputs"]["filename_prefix"], "fc/pose")
+
+    def test_outpaint_graph_sets_bottom_and_prompt(self):
+        g = fc_pose.outpaint_graph("fc/img.png", 128, "grow legs", 7, "fc/out")
+        self.assertEqual(g["31"]["inputs"]["bottom"], 128)
+        self.assertEqual(g["31"]["inputs"]["left"], 0)
+        self.assertEqual(g["14"]["inputs"]["text"], "grow legs")
+        self.assertEqual(g["18"]["inputs"]["seed"], 7)
+
+    def test_kontext_graph_wires_prompt_and_seed(self):
+        g = fc_pose.kontext_graph("fc/img.png", "A-pose", 11, "fc/apose")
+        self.assertEqual(g["8"]["inputs"]["text"], "A-pose")
+        self.assertEqual(g["12"]["inputs"]["seed"], 11)
+        self.assertEqual(g["20"]["inputs"]["filename_prefix"], "fc/apose")
+
+
+if __name__ == "__main__":
+    unittest.main()

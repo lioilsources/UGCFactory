@@ -20,6 +20,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
+import fc_pose
+
 API = os.environ.get("UGC_API", "http://ugc-api:8095")
 DATA = os.environ.get("UGC_DATA", "/data")
 SCRIPTS = os.environ.get("UGC_SCRIPTS", "/app/blender_scripts")
@@ -189,22 +191,28 @@ def comfy_upload(path):
 
 
 def comfy_run(step, image_path, timeout=None):
-    """Posle workflow a pocka na vysledek. Vraci seznam (filename, subfolder,
-    type) vsech vystupu, ktere ComfyUI zapsal.
+    """Nacte staticky workflow ze souboru (nas/workflows/), napoji obrazek
+    pres titulek FC_INPUT_IMAGE a posle."""
+    workflow, name = load_workflow(step)
+    if image_path:
+        uploaded = comfy_upload(image_path)
+        if not set_titled_source(workflow, TITLE_INPUT_IMAGE, uploaded):
+            raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
+    return comfy_submit(workflow, name, timeout)
+
+
+def comfy_submit(workflow, label, timeout=None):
+    """Posle uz hotovy graf (staveny primo v Pythonu - fc_pose.py, nebo
+    nacteny ze souboru pres comfy_run) a pocka na vysledek. Vraci seznam
+    (filename, subfolder, type) vsech vystupu, ktere ComfyUI zapsal.
 
     Kdyz nedobehne vcas, prompt se z fronty smaze: ComfyUI na Sparku sdili
     frontu s jinymi klienty a opusteny prompt by tam jinak cekal a pak zbytecne
     bezel."""
     timeout = COMFY_TIMEOUT if timeout is None else timeout
     if not COMFY:
-        raise RuntimeError(f"{step}: FC_COMFY_URL neni nastavene")
-    workflow, name = load_workflow(step)
+        raise RuntimeError(f"{label}: FC_COMFY_URL neni nastavene")
     unique_outputs(workflow, uuid.uuid4().hex[:12])
-    if image_path:
-        uploaded = comfy_upload(image_path)
-        if not set_titled_source(workflow, TITLE_INPUT_IMAGE, uploaded):
-            raise RuntimeError(f"{name}: zadny nod s titulkem {TITLE_INPUT_IMAGE}")
-
     prompt_id = comfy_post("/prompt", {"prompt": workflow})["prompt_id"]
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -213,7 +221,7 @@ def comfy_run(step, image_path, timeout=None):
         if entry:
             status = entry.get("status", {})
             if status.get("status_str") == "error":
-                raise RuntimeError(f"{step}: ComfyUI hlasi chybu, prompt {prompt_id}")
+                raise RuntimeError(f"{label}: ComfyUI hlasi chybu, prompt {prompt_id}")
             if status.get("completed") or entry.get("outputs"):
                 return collect_outputs(entry.get("outputs", {})) + prefix_candidates(workflow)
         time.sleep(3)
@@ -221,7 +229,7 @@ def comfy_run(step, image_path, timeout=None):
         comfy_post("/queue", {"delete": [prompt_id]})
     except (RuntimeError, urllib.error.URLError, OSError):
         pass
-    raise RuntimeError(f"{step}: ComfyUI nedobehl do {timeout}s (prompt {prompt_id})")
+    raise RuntimeError(f"{label}: ComfyUI nedobehl do {timeout}s (prompt {prompt_id})")
 
 
 def unique_outputs(workflow, token):
@@ -262,6 +270,13 @@ def prefix_candidates(workflow):
         if not isinstance(prefix, str) or not prefix:
             continue
         subfolder, _, base = prefix.rpartition("/")
+        if node.get("class_type") == "SavePoseKpsAsJsonFile":
+            # Vlastni save_pose_kps() nejmenuje soubor jako ostatni savery
+            # (zadne podtrzitko pred priponou): "{filename}_{counter:05}.json"
+            # - overeno ve zdrojaku node_wrappers/pose_keypoint_postprocess.py,
+            # ne za behu (viz fc_pose.py, ComfyUI na Sparku bylo vypnute).
+            out.append((f"{base}_00001.json", subfolder, "output"))
+            continue
         fmt = (node.get("inputs") or {}).get("file_format")
         exts = [fmt] if isinstance(fmt, str) and fmt else ["glb", "fbx", "png"]
         for ext in exts:
@@ -311,9 +326,74 @@ def step_preprocess(claim):
     if not c.get("auto_apose", True):
         # bez kanonizace jde do meshe rovnou zdroj; plan 3.3 to ma jako flag
         return {"artifacts": {}}
-    out = comfy_fetch(pick_output(comfy_run("char.preprocess", src), ".png", ".jpg"),
+
+    report = {}
+    try:
+        report = fix_pose(d, src)
+    except Exception as e:
+        # Oprava pozy je vylepseni pred RMBG, ne nutnost - kdyz selze (na
+        # fotce neni videt clovek, ComfyUI nema DWPose/Fill/Kontext), krok
+        # pokracuje se zdrojem rovnou na RMBG jako pred plan 14.
+        report = {"error": str(e)[:300]}
+        print(f"  preprocess: oprava pozy preskocena ({report['error']})", flush=True)
+    current = report.get("current", src)
+
+    out = comfy_fetch(pick_output(comfy_run("char.preprocess", current), ".png", ".jpg"),
                       os.path.join(d, files["apose_image"]))
+    with open(os.path.join(d, "preprocess_report.json"), "w") as f:
+        json.dump({k: v for k, v in report.items() if k != "current"}, f, indent=2)
     return {"artifacts": {"apose_image": out}}
+
+
+def fix_pose(out_dir, image_path):
+    """DWPose zmeri, jestli jsou paze srostle s telem nebo chybi nohy pod
+    kotniky, a podle toho pred RMBG pusti FLUX Fill (domysli nohy) a/nebo
+    FLUX Kontext (A-poze) - viz fc_pose.py a docs/FANTASYCHARACTER_PLAN.md
+    sekce 14. Vraci {"metrics", "stages", "current"}; "current" je posledni
+    obrazek (== image_path, kdyz se nic neaplikovalo)."""
+    kps, w, h = detect_pose(out_dir, image_path)
+    if kps is None:
+        return {"metrics": {"error": "DWPose nikoho nenasel"}, "stages": [], "current": image_path}
+    metrics = fc_pose.pose_metrics(kps)
+    stages, current = [], image_path
+
+    if fc_pose.needs_leg_outpaint(metrics):
+        bottom = fc_pose.outpaint_bottom_px(metrics, h)
+        if bottom > 0:
+            uploaded = comfy_upload(current)
+            graph = fc_pose.outpaint_graph(uploaded, bottom, fc_pose.OUTPAINT_LEGS_PROMPT,
+                                           fc_pose.POSE_FIX_SEED, "fc/outpaint")
+            outs = comfy_submit(graph, "leg outpaint")
+            current = comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_outpaint.png"))
+            stages.append({"stage": "leg_outpaint", "bottom_px": bottom})
+
+    if fc_pose.needs_arm_reshape(metrics):
+        uploaded = comfy_upload(current)
+        graph = fc_pose.kontext_graph(uploaded, fc_pose.KONTEXT_APOSE_PROMPT,
+                                      fc_pose.POSE_FIX_SEED, "fc/apose")
+        outs = comfy_submit(graph, "A-pose (Kontext)")
+        current = comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_apose.png"))
+        stages.append({"stage": "kontext_apose"})
+
+    return {"metrics": metrics, "stages": stages, "current": current}
+
+
+def detect_pose(out_dir, image_path):
+    """DWPose na lokalnim souboru; bez bbox detektoru je pomalejsi, ale
+    najde i postavy, ktere yolox mine (stejna zachrana jako tools/drive.py
+    ve video-stacku). Vraci (klouby, sirka, vyska) nebo (None, sirka, vyska),
+    kdyz DWPose nikoho nenasel ani na druhy pokus."""
+    w, h = fc_pose.image_size(image_path)
+    for bbox in ("yolox_l.onnx", "None"):
+        uploaded = comfy_upload(image_path)
+        graph = fc_pose.pose_graph(uploaded, "fc/pose", bbox)
+        outs = comfy_submit(graph, f"pose detect ({bbox})")
+        path = comfy_fetch(pick_output(outs, ".json"), os.path.join(out_dir, "pose_kps.json"))
+        with open(path) as f:
+            kps = fc_pose.parse_pose_keypoints(json.load(f), w, h)
+        if kps is not None:
+            return kps, w, h
+    return None, w, h
 
 
 def step_mesh(claim):

@@ -129,9 +129,11 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
           SwitchListTile(
             value: _autoAPose,
             onChanged: (v) => setState(() => _autoAPose = v),
-            title: const Text('Auto A-pose'),
+            title: const Text('Pripravit fotku'),
             subtitle: const Text(
-              'Prekresli postavu do A-pose. Bez toho rig u akcnich poz casto selze.',
+              'Odstrani pozadi; kdyz jsou ruce prilepene k telu, odtahne je '
+              'do A-pozy, a kdyz chybi nohy pod kotniky, domysli je. Bez '
+              'toho rig u srostlych koncetin casto selze.',
             ),
           ),
           const Divider(),

@@ -575,3 +575,35 @@ TRELLIS i MIA jsou mezi běhy nedeterministické, rozdíly kolem 0,1 jsou na hra
 
 Testovací postavy `owner=poseexp` na NASu (6 ks) a výstupy v
 `~/Code/ComfyUI/output/fc_exp/` na Sparku zůstaly pro srovnání.
+
+### Nasazeno (2026-09-16)
+
+Gated podle bodů výš: `fc_pose.py` + `char.preprocess` v `fc_worker.py`.
+Rozhodnutí padá z jedné detekce DWPose na zdrojové fotce (`detect_pose`,
+bbox `yolox_l.onnx` s fallbackem na `None` pro stylizované postavy) — obě
+brány jsou v poměrových jednotkách (šířky ramen), takže na rozdílu canvasu
+DWPose vs. skutečné fotky nezáleží:
+
+- **outpaint nohou**, když `ankles_visible` je false — `bottom_px` se
+  spočítá z `hip_y + 2,2×torso` a zaokrouhlí na 16 (FLUX Fill to vyžaduje);
+  když vyjde 0 (podlaha je uvnitř snímku), outpaint se přeskočí,
+- **A-pose (Kontext)**, když `wrist_gap_min < 0,85` — práh je nad rytířem
+  (0,81), aby chytil i hraniční případy; protože „ruce podél těla" je
+  běžnější než A-póza, tenhle krok se spustí u většiny fotek, ne jen
+  výjimečně.
+
+Gate podle tváře (ArcFace) z §14 výš se **nenasadil** — u ilustrací a maleb
+tvář často není, takže by fungoval jen na části vstupů; bez něj Kontext může
+tvář na kresbách/malbách změnit (viz `kx_res_out_ilustrace_s11_p1_s11`
+výše, tvář 0,41). Stehna u sebe zůstávají neřešená (žádný krok je nerozdělí
+spolehlivě).
+
+Selhání kroku je nefatální: `fix_pose()` je obalené v `try/except` a chyba
+(DWPose nikoho nenašel, ComfyUI nemá FLUX Fill/Kontext) jen přeskočí rovnou
+na RMBG se zdrojovou fotkou — přesně chování před sekcí 14. Report
+(`preprocess_report.json` v adresáři postavy) nese naměřené metriky a
+seznam aplikovaných kroků.
+
+Checkbox v appce („Pripravit fotku", dřív „Auto A-pose") teď popisuje, co
+dělá — odstranění pozadí je pořád jeho hlavní, vždy platná funkce; A-pose
+a outpaint jsou uvnitř gated navíc.

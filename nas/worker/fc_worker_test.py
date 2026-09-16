@@ -356,3 +356,18 @@ class TestStepRigAuto(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             fc_worker.step_rig(self.claim)
         self.assertIn("ComfyUI nedobehl", str(ctx.exception))
+
+
+class TestSavePoseKpsFilename(unittest.TestCase):
+    """save_pose_kps() ve zdrojovem uzlu jmenuje soubor jinak nez ostatni
+    savery ("{filename}_{counter:05}.json", bez podtrzitka pred priponou) -
+    overeno ve zdrojaku, ComfyUI bylo pri implementaci vypnute."""
+
+    def test_json_filename_has_no_trailing_underscore(self):
+        wf = {"3": {"class_type": "SavePoseKpsAsJsonFile",
+                    "inputs": {"pose_kps": ["2", 1], "filename_prefix": "fc/pose"}}}
+        self.assertEqual(fc_worker.prefix_candidates(wf), [("pose_00001.json", "fc", "output")])
+
+    def test_other_savers_keep_the_underscore_pattern(self):
+        wf = {"3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "fc/apose"}}}
+        self.assertIn(("apose_00001_.png", "fc", "output"), fc_worker.prefix_candidates(wf))
