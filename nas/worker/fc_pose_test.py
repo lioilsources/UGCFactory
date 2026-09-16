@@ -56,7 +56,7 @@ class TestPoseMetrics(unittest.TestCase):
 
     def test_fused_arms_and_missing_ankles_trigger_both_gates(self):
         m = fc_pose.pose_metrics(_fused_kps())
-        self.assertLess(m["wrist_gap_min"], fc_pose.ARM_GATE_WRIST_GAP)
+        self.assertLess(m["wrist_gap_min"], fc_pose.APOSE_MIN_WRIST_GAP)
         self.assertFalse(m["ankles_visible"])
         self.assertTrue(fc_pose.needs_arm_reshape(m))
         self.assertTrue(fc_pose.needs_leg_outpaint(m))
@@ -90,11 +90,22 @@ class TestPoseMetrics(unittest.TestCase):
 
 
 class TestGates(unittest.TestCase):
-    def test_arm_gate_is_a_strict_less_than(self):
-        m = {"wrist_gap_min": fc_pose.ARM_GATE_WRIST_GAP}
+    def test_only_a_finished_apose_skips_the_reshape(self):
+        m = {"arm_angle_deg": fc_pose.APOSE_MIN_ARM_ANGLE, "wrist_gap_min": fc_pose.APOSE_MIN_WRIST_GAP}
         self.assertFalse(fc_pose.needs_arm_reshape(m))
-        m["wrist_gap_min"] -= 0.01
-        self.assertTrue(fc_pose.needs_arm_reshape(m))
+        self.assertTrue(fc_pose.needs_arm_reshape({**m, "arm_angle_deg": 17.9}))
+        self.assertTrue(fc_pose.needs_arm_reshape({**m, "wrist_gap_min": 0.99}))
+
+    def test_arms_down_along_wide_hips_still_need_reshaping(self):
+        # malby z Ol1nLLM 2026-09-16: paze na tele, ale zapesti daleko od osy
+        for m in ({"arm_angle_deg": 1.7, "wrist_gap_min": 1.33},
+                  {"arm_angle_deg": 2.0, "wrist_gap_min": 1.32}):
+            self.assertTrue(fc_pose.needs_arm_reshape(m))
+
+    def test_unmeasurable_arms_are_left_alone(self):
+        # bez pazi by vysledek nesel zkontrolovat, tak se ani neprepozovava
+        self.assertFalse(fc_pose.needs_arm_reshape({"shoulder_w": 100.0, "ankles_visible": True}))
+        self.assertFalse(fc_pose.needs_arm_reshape({"wrist_gap_min": 0.3}))
 
     def test_error_metrics_never_trigger_either_gate(self):
         m = {"error": "chybi ramena nebo boky"}

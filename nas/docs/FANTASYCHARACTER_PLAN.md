@@ -588,6 +588,7 @@ DWPose vs. skutečné fotky nezáleží:
   spočítá z `hip_y + 2,2×torso` a zaokrouhlí na 16 (FLUX Fill to vyžaduje);
   když vyjde 0 (podlaha je uvnitř snímku), outpaint se přeskočí,
 - **A-pose (Kontext)**, když `wrist_gap_min < 0,85` — práh je nad rytířem
+  *(od §17 už tahle brána neplatí: rozhoduje `apose_accepted`)*
   (0,81), aby chytil i hraniční případy; protože „ruce podél těla" je
   běžnější než A-póza, tenhle krok se spustí u většiny fotek, ne jen
   výjimečně.
@@ -737,3 +738,31 @@ volbu nemění.
 Proč to samotný `stretch_mean` nechytí: naklonění kostry mesh netrhá, jen ho
 celý otočí — hrany si drží délku, takže metrika z §13 je slepá. Proto dvě
 čísla, ne jedno.
+
+## 17. Brána A-pózy podle úhlu paží, ne vzdálenosti zápěstí (měřeno 2026-09-16)
+
+Pět nových figurek z Ol1nLLM po nasazení §15: u dvou zůstaly paže srostlé
+s trupem, protože se u nich přepózování **vůbec nespustilo**.
+
+| figurka | zdroj: úhel paže / mezera zápěstí | brána | výsledek |
+|---|---|---|---|
+| 1c4769b8 | 8,8° / 0,31 | spustila | Wan 45,8° / 1,53 ✔ |
+| 8a719eff | 90° / 0,09 (ruka u hlavy) | spustila | Wan 45,5° / 1,55 ✔ |
+| 0f78f8f7 | 90° / 0,16 | spustila | Wan 46,0° / 1,49 ✔ |
+| **f19b625d** (malba) | **2,0° / 1,32** | **přeskočila** | paže na těle, `stretch_p999` 11,6 |
+| **a76b45de** (malba) | **1,7° / 1,33** | **přeskočila** | paže na těle, `stretch_p999` 10,4 |
+
+Příčina: `wrist_gap` se měří od **osy trupu**, ne od obrysu těla. U postavy
+se štíhlým pasem a širokými boky (obě malby, ruce svěšené k bokům) vyjde
+zápěstí 1,3 šířky ramen od osy, i když paže leží celou délkou na těle. Brána
+„mezera < 0,85" to proto pustila jako hotovou A-pózu. Úhel paže přitom říkal
+pravdu: 1,7° a 2,0° (svisle dolů).
+
+**Nasazeno:** `needs_arm_reshape(m)` = `not apose_accepted(m)` — přepózuje se
+všechno, co ještě není A-póza (úhel ≥ 18° **a** mezera ≥ 1,0), tedy stejný
+práh, jakým se pak výsledek přijímá. `ARM_GATE_WRIST_GAP` zrušen. Bez
+změřených paží se nepřepózovává dál (výsledek by nešel zkontrolovat).
+
+Cena: Wan teď poběží skoro u každé fotky (~2 min navíc), protože skutečná
+A-póza na vstupu je vzácná. To je záměr — je to levnější než rig, který
+blánu stejně nerozdělí.

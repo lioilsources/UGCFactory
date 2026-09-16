@@ -11,8 +11,8 @@ Tenhle modul rozhoduje (podle DWPose kloubu) a stavi ComfyUI grafy pro dva
 volitelne kroky pred RMBG (`char.preprocess`):
 
   - outpaint chybejicich nohou (FLUX Fill), kdyz DWPose nevidi kotniky
-  - A-pose (FLUX Kontext), kdyz jsou zapesti bliz nez ARM_GATE_WRIST_GAP
-    sirek ramen od osy trupu
+  - A-pose (Wan Animate, zaloha FLUX Kontext), kdyz poza jeste neni A-poza
+    (APOSE_MIN_ARM_ANGLE, APOSE_MIN_WRIST_GAP)
 
 Vse tady je ciste - zadne site ani IO, testovatelne bez ComfyUI stejne jako
 fc_ranges.py. Orchestraci (upload, submit, stazeni) dela fc_worker.py.
@@ -26,20 +26,20 @@ NECK, RSHO, LSHO, RELB, LELB, RWRI, LWRI = 1, 2, 5, 3, 6, 4, 7
 RHIP, LHIP, RKNEE, LKNEE, RANK, LANK = 8, 11, 9, 12, 10, 13
 CONF_MIN = 0.3
 
-# Zapesti bliz nez tohle (v sirkach ramen) od osy trupu = ruce prilepene
-# k telu. Zmereno 2026-09-15: foto 0.54, malba 0.56 (obe zjevne srostle),
-# rytir 0.81 (jeste videt mezeru, ale natazeni meshe se po oprave presto
-# zlepsilo 1.234 -> 1.167). Prah je nad rytirem, aby chytil i hranicni
-# pripady - vetsina fotek ma ruce dole, takze se tenhle krok spusti casto.
-ARM_GATE_WRIST_GAP = 0.85
-
-# Kdy je vystup prepozovani opravdu A-poza. Zmereno 2026-09-16 na 12
-# postavach (DWPose na vystupu Kontextu): ctyri, ktere dopadly dobre (mesh
-# s oddelenymi pazemi), mely uhel paze 18-26 stupnu a mezeru zapesti
-# 1.02-1.18; osm spatnych (paze dal podel tela nebo beze zmeny) 7-14 stupnu
-# a mezeru do 0.95 - nebo velky uhel s malou mezerou (ruka na boku, za
-# hlavou). Obe podminky zaroven. Samotny gate ARM_GATE_WRIST_GAP nestaci:
-# 0.95 projde, a paze jsou pritom prilepene.
+# Kdy uz je poza A-poza - stejny prah rozhoduje pred prepozovanim (jestli
+# ho vubec pustit) i po nem (jestli se vysledek prijme).
+#
+# Zmereno 2026-09-16 na 12 postavach (DWPose na vystupu Kontextu): ctyri,
+# ktere dopadly dobre (mesh s oddelenymi pazemi), mely uhel paze 18-26 stupnu
+# a mezeru zapesti 1.02-1.18; osm spatnych (paze dal podel tela nebo beze
+# zmeny) 7-14 stupnu a mezeru do 0.95 - nebo velky uhel s malou mezerou
+# (ruka na boku, za hlavou). Proto obe podminky zaroven.
+#
+# Mezera zapesti sama nestaci ani jako vstupni brana: meri se od OSY trupu,
+# takze u sirokych boku vyjde velka, i kdyz paze lezi na tele. Dve malby z
+# Ol1nLLM 2026-09-16 (rukama podel tela) mely uhel 1.7 a 2.0 stupne, ale
+# mezeru 1.32 a 1.33 - drivejsi brana (mezera < 0.85) je pustila bez opravy
+# a TRELLIS je odlil s pazemi srostlymi s trupem.
 APOSE_MIN_ARM_ANGLE = 18.0
 APOSE_MIN_WRIST_GAP = 1.0
 
@@ -166,9 +166,11 @@ def needs_leg_outpaint(metrics):
 
 
 def needs_arm_reshape(metrics):
-    if "error" in metrics or "wrist_gap_min" not in metrics:
+    """Prepozovat se nemusi jen uz hotova A-poza. Bez merenych pazi se
+    neprepozovava - vysledek by nesel zkontrolovat (apose_accepted)."""
+    if "error" in metrics or "wrist_gap_min" not in metrics or "arm_angle_deg" not in metrics:
         return False
-    return metrics["wrist_gap_min"] < ARM_GATE_WRIST_GAP
+    return not apose_accepted(metrics)
 
 
 def apose_accepted(metrics):
