@@ -685,6 +685,15 @@ kotníky leží 1,36–2,27 délky trupu pod boky (nejméně selfie z nízka),
 hádané 0,92. `pose_metrics` teď hlásí `leg_ratio` a kotníky bere jako
 viditelné jen od `LEG_MIN_RATIO = 1,2`.
 
+**Ořez pruhů na okrajích** (tatáž figurka, druhý pokus): po opravě brány
+outpaint proběhl, ale FLUX Fill domyslel nohy **pod černý pás přehrávače**
+na spodku screenshotu — namaloval tam náhledový pás videa a Wan z toho
+udělal bílé chomáče u kotníků. `fc_trim_bars.py` (Blender + numpy, worker
+nemá Pillow) proto před vším odřízne souvislé jednobarevné řádky od horního
+i spodního okraje (`fc_pose.bar_bounds`: std řádku < 8 z 0–255, pás aspoň
+1 % výšky; řádky fotek mají std ≥ 14, pruhy 0). Zapíše `source_trim.png`
+a report má stage `trim_bars`.
+
 Cena: Wan ~80 s na postavu, když je GPU volné (~200 s vedle Tsumiki jobů),
 plus DWPose kontrola. Výstup je 480×832 (nativní 480p), TRELLIS si vstup
 stejně zmenšuje na 518 px. Stehna u sebe: kostra driveru je má 10° od sebe,

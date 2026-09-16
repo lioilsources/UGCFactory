@@ -354,11 +354,15 @@ def fix_pose(out_dir, image_path):
     FLUX Kontext (A-poze) - viz fc_pose.py a docs/FANTASYCHARACTER_PLAN.md
     sekce 14. Vraci {"metrics", "stages", "current"}; "current" je posledni
     obrazek (== image_path, kdyz se nic neaplikovalo)."""
+    stages = []
+    image_path, trim = trim_bars(out_dir, image_path)
+    if trim:
+        stages.append(trim)
     kps, w, h = detect_pose(out_dir, image_path)
     if kps is None:
-        return {"metrics": {"error": "DWPose nikoho nenasel"}, "stages": [], "current": image_path}
+        return {"metrics": {"error": "DWPose nikoho nenasel"}, "stages": stages, "current": image_path}
     metrics = fc_pose.pose_metrics(kps)
-    stages, current = [], image_path
+    current = image_path
 
     if fc_pose.needs_leg_outpaint(metrics):
         bottom = fc_pose.outpaint_bottom_px(metrics, h)
@@ -375,6 +379,20 @@ def fix_pose(out_dir, image_path):
         stages.append(stage)
 
     return {"metrics": metrics, "stages": stages, "current": current}
+
+
+def trim_bars(out_dir, image_path):
+    """Odrizne jednobarevne pruhy nahore/dole (screenshot z telefonu) -
+    blender_scripts/fc_trim_bars.py, rozhoduje fc_pose.bar_bounds. Vraci
+    (obrazek, zaznam do reportu nebo None); kdyz neni co riznout, vraci
+    puvodni cestu."""
+    out = os.path.join(out_dir, "source_trim.png")
+    report = run_blender("fc_trim_bars.py", {"id": os.path.basename(out_dir) + "-trim",
+                                             "image": image_path, "out": out})
+    if not report.get("written"):
+        return image_path, None
+    print(f"  preprocess: pruhy odriznuty {report}", flush=True)
+    return out, {"stage": "trim_bars", "top": report["top"], "bottom": report["bottom"]}
 
 
 def reshape_arms(out_dir, image_path, source_metrics):

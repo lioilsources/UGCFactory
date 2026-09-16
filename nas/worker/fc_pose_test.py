@@ -121,6 +121,27 @@ class TestAposeAcceptance(unittest.TestCase):
         self.assertLess(fc_pose.apose_score(cands[0]), fc_pose.apose_score(cands[1]))
 
 
+class TestBarBounds(unittest.TestCase):
+    # std radku z mereni 2026-09-16: pruh 0, fotka 14-55
+    def test_black_player_bar_at_the_bottom_is_cut(self):
+        rows = [16.0] * 919 + [0.0] * 105          # tanecnice: 1024 radku, dole 105 cernych
+        self.assertEqual(fc_pose.bar_bounds(rows, 1024), (0, 105))
+
+    def test_status_strip_at_the_top_is_cut(self):
+        rows = [0.0] * 64 + [21.0] * 2372          # silonky: nahore 64 cernych z 2436
+        self.assertEqual(fc_pose.bar_bounds(rows, 2436), (64, 0))
+
+    def test_short_flat_band_is_a_compression_artifact_not_a_bar(self):
+        rows = [0.0] * 5 + [40.0] * 1000           # 0.5 % vysky -> nechat
+        self.assertEqual(fc_pose.bar_bounds(rows, 1005), (0, 0))
+
+    def test_entirely_flat_image_is_left_alone(self):
+        self.assertEqual(fc_pose.bar_bounds([0.0] * 100, 100), (0, 0))
+
+    def test_photo_rows_never_count_as_bars(self):
+        self.assertEqual(fc_pose.bar_bounds([14.0] * 50 + [54.0] * 50, 100), (0, 0))
+
+
 class TestOutpaintBottom(unittest.TestCase):
     def test_rounds_up_to_a_multiple_of_16(self):
         # floor_y = hip_y(1000) + 2.2*torso(300) = 1660; vyska obrazku 1400

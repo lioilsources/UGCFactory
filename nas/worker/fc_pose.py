@@ -54,6 +54,14 @@ LEGS_BELOW_HIPS = 2.2
 # "nasel" s confidence 1.0: 0.92 - ta bez outpaintu skoncila bez nohou.
 LEG_MIN_RATIO = 1.2
 
+# Jednobarevne pruhy na okrajich (cerny pas prehravace / stavova lista na
+# screenshotu z telefonu) se pred vsim odriznou (blender_scripts/
+# fc_trim_bars.py): FLUX Fill jinak "domysli nohy" pod cerny pruh a namaluje
+# tam nesmysl. Zmereno 2026-09-16: radky pruhu maji std 0, radky fotky
+# aspon 14 (studio i tmave pozadi); pruh je 2.6-10 % vysky.
+BAR_STD_MAX = 8.0
+BAR_MIN_FRAC = 0.01
+
 # Podrobny prompt drzi identitu (tvar ArcFace 0.96 na fotce); kratky
 # ("same person... A-pose") ji srazi na 0.72-0.73 - nikdy nepouzivat kratky.
 KONTEXT_APOSE_PROMPT = (
@@ -189,6 +197,24 @@ def outpaint_bottom_px(metrics, image_height):
     floor_y = metrics["hip_y"] + LEGS_BELOW_HIPS * metrics["torso"]
     extra = max(floor_y - image_height, 0)
     return int(math.ceil(extra / 16) * 16)
+
+
+def bar_bounds(row_std, height, std_max=BAR_STD_MAX, min_frac=BAR_MIN_FRAC):
+    """Kolik radku odriznout nahore a dole: souvisly pas "plochych" radku
+    (smerodatna odchylka pixelu v radku pod std_max, v 0-255) od kraje.
+    Pas kratsi nez min_frac vysky se nechava (kompresni artefakt, ne pruh);
+    kdyz je plochy cely obrazek, nerezeme nic."""
+    n = len(row_std)
+    top = 0
+    while top < n and row_std[top] < std_max:
+        top += 1
+    if top >= n:
+        return 0, 0
+    bottom = 0
+    while bottom < n and row_std[n - 1 - bottom] < std_max:
+        bottom += 1
+    limit = min_frac * height
+    return (top if top >= limit else 0), (bottom if bottom >= limit else 0)
 
 
 def image_size(path):
