@@ -48,6 +48,12 @@ APOSE_MIN_WRIST_GAP = 1.0
 # vyplati outpaintovat, kdyz kotniky nejsou videt.
 LEGS_BELOW_HIPS = 2.2
 
+# Kotnik se bere jako skutecny, jen kdyz je aspon tolik trupu pod boky.
+# Zmereno 2026-09-16 na 16 postavach: opravdove nohy 1.36-2.27 (nejmene
+# selfie z nizka), fotka useknuta v pulce stehen, kde DWPose kotniky
+# "nasel" s confidence 1.0: 0.92 - ta bez outpaintu skoncila bez nohou.
+LEG_MIN_RATIO = 1.2
+
 # Podrobny prompt drzi identitu (tvar ArcFace 0.96 na fotce); kratky
 # ("same person... A-pose") ji srazi na 0.72-0.73 - nikdy nepouzivat kratky.
 KONTEXT_APOSE_PROMPT = (
@@ -135,6 +141,13 @@ def pose_metrics(kps):
         m["arm_angle_deg"] = round(sum(a["angle_deg"] for a in arms) / len(arms), 1)
         m["wrist_gap_min"] = round(min(a["wrist_gap"] for a in arms), 2)
     m["ankles_visible"] = ok(RANK) and ok(LANK)
+    if m["ankles_visible"]:
+        # DWPose kotniky "vidi" i na fotce useknute v pulce stehen (confidence
+        # 1.0 u bodu tesne nad spodnim okrajem) - skutecne kotniky jsou ale
+        # aspon LEG_MIN_RATIO trupu pod boky, hadane ne
+        ankle_y = max(kps[RANK][1], kps[LANK][1])
+        m["leg_ratio"] = round((ankle_y - hip[1]) / max(torso, 1e-6), 2)
+        m["ankles_visible"] = m["leg_ratio"] >= LEG_MIN_RATIO
     if m["ankles_visible"]:
         m["ankle_spread"] = round(_dist(kps[RANK], kps[LANK]) / shoulder_w, 2)
     return m

@@ -26,11 +26,11 @@ def _apose_kps():
         (170, 100, 0.9),    # 6 L loket
         (190, 130, 0.9),    # 7 L zapesti
         (85, 220, 0.9),     # 8 R bok
-        (85, 320, 0.9),     # 9 R koleno
-        (85, 420, 0.9),     # 10 R kotnik
+        (85, 340, 0.9),     # 9 R koleno
+        (85, 460, 0.9),     # 10 R kotnik (1.5 trupu pod boky - skutecny)
         (115, 220, 0.9),    # 11 L bok
-        (115, 320, 0.9),    # 12 L koleno
-        (115, 420, 0.9),    # 13 L kotnik
+        (115, 340, 0.9),    # 12 L koleno
+        (115, 460, 0.9),    # 13 L kotnik
         (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0),
     ]
 
@@ -59,6 +59,18 @@ class TestPoseMetrics(unittest.TestCase):
         self.assertLess(m["wrist_gap_min"], fc_pose.ARM_GATE_WRIST_GAP)
         self.assertFalse(m["ankles_visible"])
         self.assertTrue(fc_pose.needs_arm_reshape(m))
+        self.assertTrue(fc_pose.needs_leg_outpaint(m))
+
+    def test_confident_ankles_too_close_to_the_hips_are_not_ankles(self):
+        # fotka useknuta v pulce stehen: DWPose dal kotniky s confidence 1.0
+        # kousek pod boky (0.9 trupu; trup = 160 px) - musi se outpaintovat
+        kps = _apose_kps()
+        kps[10] = (85, 220 + 0.9 * 160, 1.0)
+        kps[13] = (115, 220 + 0.9 * 160, 1.0)
+        m = fc_pose.pose_metrics(kps)
+        self.assertAlmostEqual(m["leg_ratio"], 0.9, places=1)
+        self.assertFalse(m["ankles_visible"])
+        self.assertNotIn("ankle_spread", m)
         self.assertTrue(fc_pose.needs_leg_outpaint(m))
 
     def test_missing_hips_or_shoulders_is_an_error(self):

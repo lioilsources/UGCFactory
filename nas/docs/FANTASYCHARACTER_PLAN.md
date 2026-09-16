@@ -676,6 +676,15 @@ Slepé uličky cestou (ať se neopakují):
 - **Bez retargetu** funguje také (proporce driveru místo reference); zapnutý
   retarget je oficiální chování a proporce postavy drží lépe.
 
+**Brána outpaintu podle geometrie, ne confidence** (dodatek téhož dne):
+první nová figurka z Ol1nLLM po nasazení skončila bez nohou — screenshot
+uříznutý v půlce stehen, ale DWPose vrátil kotníky s confidence 1,0 těsně
+nad spodním okrajem, takže `ankles_visible` bylo true, outpaint se
+přeskočil a Wan přepózoval poloviční referenci. Na 16 postavách: skutečné
+kotníky leží 1,36–2,27 délky trupu pod boky (nejméně selfie z nízka),
+hádané 0,92. `pose_metrics` teď hlásí `leg_ratio` a kotníky bere jako
+viditelné jen od `LEG_MIN_RATIO = 1,2`.
+
 Cena: Wan ~80 s na postavu, když je GPU volné (~200 s vedle Tsumiki jobů),
 plus DWPose kontrola. Výstup je 480×832 (nativní 480p), TRELLIS si vstup
 stejně zmenšuje na 518 px. Stehna u sebe: kostra driveru je má 10° od sebe,
