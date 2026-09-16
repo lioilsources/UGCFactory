@@ -26,7 +26,15 @@ TARGETS = {
 }
 TARGET_HEIGHT_M = 1.8
 DECIMATE_TARGET_FRACTION = 0.9   # rezerva na triangulaci, stejne jako convert.py
-VOXEL_ADAPTIVE_FRACTION = 0.008
+
+# Velikost voxelu jako podil nejvetsiho rozmeru. POZOR: remesh bezi jeste
+# pred scale_and_ground, takze mesh ma vysku ~1.0 a prepocet na metry je
+# * 1.8. Puvodnich 0.008 = 14 mm na hotove postave, coz je vic nez je silny
+# prst (~15 mm) - voxel remesh sezral prsty, prsty u nohou i rysy obliceje a
+# z rukou delal palcaky (zmereno 2026-09-16, 37 z 38 postav remeshem proslo).
+# 0.002 = 3.6 mm prsty udrzi; cena je 5 s remesh + 11 s decimate misto 2 s
+# (mezivysledek 486k trojuhelniku), coz je v 8-12 minutove pipeline nic.
+VOXEL_ADAPTIVE_FRACTION = 0.002
 
 
 # Bake projekci zdroj -> cil. Kratsi paprsek nez u convert.py: postava ma
@@ -130,7 +138,7 @@ def remesh_if_open(obj):
     vahy, ktere pri animaci trhaji koncetiny. Remeshujeme jen kdyz je mesh
     opravdu deravy, protoze voxel remesh zahodi UV i ostre hrany."""
     if open_edges(obj) == 0:
-        return False
+        return 0.0
     dims = obj.dimensions
     voxel = max(max(dims) * VOXEL_ADAPTIVE_FRACTION, 0.0005)
     solidify_sheets(obj, voxel * SOLIDIFY_VOXELS)
@@ -138,7 +146,9 @@ def remesh_if_open(obj):
     mod.mode = "VOXEL"
     mod.voxel_size = voxel
     bpy.ops.object.modifier_apply(modifier=mod.name)
-    return True
+    # v milimetrech hotove postavy, at je v reportu videt, co remesh stihne
+    # rozlisit (prst ma ~15 mm)
+    return round(voxel * (TARGET_HEIGHT_M / max(dims.z, 1e-6)) * 1000, 1)
 
 
 def decimate_to(obj, max_tris):
@@ -287,7 +297,7 @@ def main():
     # remesh i decimate jedou pres modifier_apply, ktery bere AKTIVNI objekt -
     # bez tohohle by se pouzily na zdroj a cil zustal neztenceny.
     activate(obj)
-    remeshed = remesh_if_open(obj)
+    voxel_mm = remesh_if_open(obj)
     tris = decimate_to(obj, budget["max_tris"])
     uv_ok = ensure_uv(obj)
     atlas_path = os.path.join(out_dir, "clean_tex.png")
@@ -303,7 +313,8 @@ def main():
         "tri_count_in": tris_in,
         "tri_count": tris,
         "max_tris": budget["max_tris"],
-        "remeshed": remeshed,
+        "remeshed": bool(voxel_mm),
+        "voxel_mm": voxel_mm or None,
         "open_edges_in": open_edges_in,
         "uv_ok": uv_ok,
         "texture_size": budget["bake_size"],

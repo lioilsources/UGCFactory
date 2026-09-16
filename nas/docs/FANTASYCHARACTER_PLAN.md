@@ -766,3 +766,47 @@ změřených paží se nepřepózovává dál (výsledek by nešel zkontrolovat)
 Cena: Wan teď poběží skoro u každé fotky (~2 min navíc), protože skutečná
 A-póza na vstupu je vzácná. To je záměr — je to levnější než rig, který
 blánu stejně nerozdělí.
+
+## 18. Voxel remesh v cleanupu jedl prsty (měřeno 2026-09-16)
+
+Uživatel hlásil pokřivené, „useknuté" ruce a nohy i po nasazení A-pózy.
+Není to póza — A-póza řeší **srůst** končetin s trupem (§15–17) a ten je
+vyřešený. Detail ničí až `char.clean`.
+
+`remesh_if_open` pouští voxel remesh, jakmile má mesh **jedinou** otevřenou
+hranu. Naměřeno na 38 postavách: **37 remeshem prošlo**, spouštěč byl často
+2–19 otevřených hran (pár chybějících trojúhelníků). Velikost voxelu byla
+`0,008 × největší rozměr`, a protože remesh běží ještě před
+`scale_and_ground`, mesh má výšku ~1,0 → po škálování na 1,8 m to je
+**14 mm**. Prst je silný ~15 mm, takže:
+
+- prsty na rukou se slily v palčák nebo zmizely,
+- prsty u nohou zmizely,
+- rysy obličeje se vyhladily do masky,
+- pásek a manžety kalhot se ztratily.
+
+Srovnání na tančící figurce (stejný `mesh.glb`, stejný rozpočet 7200 tris):
+
+| varianta | prsty | obličej | otevřené hrany | cena |
+|---|---|---|---|---|
+| surový TRELLIS 30k | ✔ | ✔ | 28 | — |
+| produkce: voxel 14,2 mm | ✘ palčáky | ✘ maska | 0 | 1 s + 1 s |
+| `fill_holes` místo remeshe | ✔ | ✔ | **28 (nezavře)** | 0 s |
+| **voxel 3,6 mm** | ✔ | ✔ | **0** | 5 s + 11 s |
+
+`fill_holes` detail udrží, ale díry nezavře (jsou to nerovinné hranice), a
+auto-rig uzavřenou skořápku potřebuje — proto vyhrál jemnější voxel.
+
+**Nasazeno:** `VOXEL_ADAPTIVE_FRACTION = 0.008 → 0.002`, report nese
+`voxel_mm` (kolik remesh reálně rozliší). Mezivýsledek je 486k trojúhelníků
+místo 34k, decimate na 7200 je pak pomalejší — dohromady 16 s místo 2 s, což
+je v 8–12minutové pipeline nic. Ověřeno end-to-end včetně bake: textura sedí
+a smouha v rozkroku, kterou dělal hrubý remesh, zmizela.
+
+Po decimaci zůstávají 3 otevřené hrany (dřív 0). Rig si díry zavírá sám
+(šablona hlásí `open_edges_after_repair: 0`, MIA `weights_filled`), takže to
+zatím nevadí — hlídat, kdyby se u nějaké postavy trhaly končetiny.
+
+Otevřené: rozpočet 8000 trojúhelníků na celou postavu je pořád málo na to,
+aby prsty byly hladké — stojí za zvážení zvednout `user` cíl, Roblox a
+Luanti mají limity enginu.
