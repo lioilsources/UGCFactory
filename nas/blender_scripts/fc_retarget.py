@@ -24,6 +24,7 @@ Vysledek: {"ranges": {clip_id: [start, end]}} do retarget_ranges.json.
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -34,6 +35,14 @@ from mathutils import Matrix, Vector
 GAP_FRAMES = 5          # mezera mezi klipy, at posledni snimek nepretece do dalsiho
 MIXAMO_PREFIX = "mixamorig"
 HIPS_BONE = "mixamorig:Hips"   # kost, na ktere Mixamo veze root motion
+
+# Kosti, u kterych se hlida, jak daleko je klidova poza rigu od Mixamo
+# kostry (rest_offset_deg v reportu). Paze v seznamu nejsou: nase rigy maji
+# ruce v A-poze a Mixamo v T-poze, takze tam je rozdil 80 stupnu spravne.
+# Boky a nohy ale v A-poze miri skoro stejne jako v T-poze, takze velky
+# rozdil znamena, ze kostra nesedi do tela - a mesh se pak v kazdem snimku
+# natoci navic prave o nej (plan sekce 16).
+CORE_BONES = ("Hips", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg")
 
 
 def parse_args():
@@ -130,7 +139,7 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
     tgt_rot_w = rotation_of(target.matrix_world)
     tgt_rot_w_inv = tgt_rot_w.inverted()
 
-    correction = {}
+    correction, rest_offset = {}, {}
     for b in bones:
         sb = src.data.bones.get(b.name)
         if sb is None:
@@ -139,6 +148,7 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
         t_rest = tgt_rot_w @ rotation_of(b.matrix_local)
         align = (t_rest @ Vector((0, 1, 0))).rotation_difference(s_rest @ Vector((0, 1, 0)))
         correction[b.name] = s_rest.inverted() @ align @ t_rest
+        rest_offset[b.name.split(":")[-1]] = round(math.degrees(align.angle), 1)
 
     hips_rest_w = src.matrix_world @ src.data.bones[HIPS_BONE].head_local
     src_feet, tgt_feet = foot_bones(src), foot_bones(target)
@@ -211,7 +221,7 @@ def bake_clip(target, src, clip_id, translation_scale, in_place):
         b.rotation_mode = "QUATERNION"
     floor_fix = keep_mesh_above_floor(target, action, start, end)
     return (action, (round(max(bob) - min(bob), 3) if bob else 0.0), round(leg_ratio, 4),
-            floor_fix)
+            floor_fix, rest_offset)
 
 
 def keep_mesh_above_floor(target, action, start, end):
@@ -371,6 +381,7 @@ def main():
     # miste. Vypnout jde per job pro pripad, ze by nekdo root motion chtel.
     in_place = job.get("in_place", True)
     ranges, missing, ratios, bobs, leg_ratios, floor_fixes = {}, {}, {}, {}, {}, {}
+    rest_offsets = {}
     cursor = 1
     for clip in job["clips"]:
         clip_id = clip["id"]
@@ -392,8 +403,9 @@ def main():
         gap = bones_in_action(src_action) - target_bones
         if gap:
             missing[clip_id] = sorted(gap)[:8]
-        action, bobs[clip_id], leg_ratios[clip_id], floor_fixes[clip_id] = bake_clip(
+        action, bobs[clip_id], leg_ratios[clip_id], floor_fixes[clip_id], offsets = bake_clip(
             target, src, clip_id, ratio * float(clip.get("location_scale", 1.0)), in_place)
+        rest_offsets = offsets or rest_offsets   # klidova poza je pro vsechny klipy stejna
 
         for o in objs:
             bpy.data.objects.remove(o, do_unlink=True)
@@ -439,6 +451,9 @@ def main():
         "hips_bob_m": bobs,
         "leg_ratio": leg_ratios,
         "floor_fix_m": floor_fixes,
+        "rest_offset": {b: rest_offsets[b] for b in CORE_BONES if b in rest_offsets},
+        "rest_offset_deg": max((rest_offsets[b] for b in CORE_BONES if b in rest_offsets),
+                               default=None),
         "blend": os.path.basename(blend_path),
     }
     with open(os.path.join(out_dir, "retarget_ranges.json"), "w") as f:

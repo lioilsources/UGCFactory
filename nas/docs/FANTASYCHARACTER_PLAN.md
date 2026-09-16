@@ -698,3 +698,42 @@ Cena: Wan ~80 s na postavu, když je GPU volné (~200 s vedle Tsumiki jobů),
 plus DWPose kontrola. Výstup je 480×832 (nativní 480p), TRELLIS si vstup
 stejně zmenšuje na 518 px. Stehna u sebe: kostra driveru je má 10° od sebe,
 takže Wan je rozdělí — vedlejší zisk oproti §14.
+
+## 16. Volba rigu podle klidové pózy, ne jen natažení (měřeno 2026-09-16)
+
+Tančící figurka z Ol1nLLM měla „divné nohy": v každém snímku většího
+předklonu a pokrčení kolen než mannequin. Postup měření:
+
+1. **Póza je z klipu.** Mixamo Y-bot se v Salse předklání a krčí kolena taky
+   (render zdroje vedle naší postavy) — dřep si retarget nevymýšlí.
+2. **Kosti míří správně.** Úhel mezi směrem kosti v naší animaci a ve zdroji
+   je po snímcích **0,0°** — u MIA i u šablony. Retarget je v pořádku.
+3. **Rozdíl dělá klidová póza rigu.** `bake_clip` míří kost tam, kam míří ve
+   zdroji (korekce `align`). Mesh se přitom otáčí o `R_poza · R_rest⁻¹`,
+   takže mu zůstane navíc přesně ten rozdíl klidových směrů — v každém
+   snímku každého klipu. Naměřeno proti Mixamo kostře:
+
+   | postava | rig | boky | stehna | kolena | vybráno podle stretch |
+   |---|---|---|---|---|---|
+   | tančící figurka | MIA | 13° | 26,7° / 25° | 14° / 15,5° | **MIA** (1,108 vs 1,133) |
+   | golden Teresa | MIA | 4,6° | 15,1° / 8,6° | 13,5° / 16° | **MIA** (1,108 vs 1,133) |
+   | silonky, Test Knight, busty blonde | MIA | 2,7–5,2° | 6,6–22,9° | 10–20° | šablona |
+   | kterákoli | šablona | 0,7° | 0,4° | 3,9° | — |
+
+   Šablona je Mixamo-like z konstrukce (proto vždy 3,9°), MIA fituje kostru
+   do meshe a systematicky ji naklání. K tomu posadí koleno na 0,267 výšky
+   proti Mixamo 0,331 a poměr stehno/lýtko 1,07 proti 0,75, takže ohyb padne
+   jinam, než kam klip míří.
+
+**Nasazeno:** `fc_retarget.py` hlásí `rest_offset` / `rest_offset_deg` (úhel
+korekce `align` na bocích a nohou — `CORE_BONES`; paže v tom nejsou, tam je
+rozdíl A-póza vs T-póza legitimních 80°), `score_rig` ho přidá ke skóre a
+`choose_rig` rig s odchylkou nad `REST_OFFSET_MAX` (10°) nevybere, dokud je
+jiný kandidát pod ní. Když neprojde nikdo, rozhoduje jako dřív natažení;
+skóre bez `rest_offset_deg` (starší postavy, fixture) nediskvalifikuje.
+Prakticky to překlápí tančící figurku a Teresu na šablonu, ostatní postavy
+volbu nemění.
+
+Proč to samotný `stretch_mean` nechytí: naklonění kostry mesh netrhá, jen ho
+celý otočí — hrany si drží délku, takže metrika z §13 je slepá. Proto dvě
+čísla, ne jedno.

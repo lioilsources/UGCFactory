@@ -39,6 +39,11 @@ PREVIEW_MODE = os.environ.get("FC_PREVIEW", "thumb")
 # Ani jedna nevyhrava vzdy - MIA u fotek cele postavy, sablona u brneni s
 # plastem a orezanych postav - takze 'auto' udela obe a vybere podle skore.
 RIG_MODE = os.environ.get("FC_RIG", "auto")
+# Nad kolik stupnu odchylky klidove pozy od Mixamo kostry (boky a nohy, viz
+# fc_retarget.CORE_BONES) se rig v auto rezimu nebere. Zmereno 2026-09-16 na
+# peti postavach: sablona vzdy 3.9, MIA 14.9-26.7 - a prave u dvou postav,
+# kde MIA vyhral na natazeni, byl vysledek v predklonu.
+REST_OFFSET_MAX = float(os.environ.get("FC_RIG_REST_OFFSET_MAX", "10"))
 # Ridici A-pose fotka pro Wan Animate (fc_pose.repose_graph) - jak vznikla,
 # viz blender_scripts/fc_apose_driver.py a docs/FANTASYCHARACTER_PLAN.md 14.
 APOSE_DRIVER = os.environ.get("FC_APOSE_DRIVER", "/app/assets/apose_driver.png")
@@ -510,11 +515,13 @@ def rig_mia(claim, out_dir, timeout=None):
 
 
 def score_rig(claim, rig_dir, clip):
-    """Nasadi na rig klip a zmeri, jak se mesh trha (fc_rig_score.py)."""
+    """Nasadi na rig klip a zmeri, jak se mesh trha (fc_rig_score.py) a jak
+    daleko je klidova poza rigu od Mixamo kostry (rest_offset_deg z
+    retargetu) - obe cisla rozhoduji v choose_rig."""
     atlas = os.path.join(claim["dir"], "clean_tex.png")
     if os.path.exists(atlas):
         shutil.copy(atlas, os.path.join(rig_dir, "clean_tex.png"))
-    run_blender("fc_retarget.py", {
+    retarget = run_blender("fc_retarget.py", {
         "id": claim["character"]["id"],
         "rigged_fbx": os.path.join(rig_dir, "rigged.fbx"),
         "out_dir": rig_dir,
@@ -522,7 +529,9 @@ def score_rig(claim, rig_dir, clip):
     })
     blend = os.path.join(rig_dir, "animated.blend")
     try:
-        return run_blender("fc_rig_score.py", {"id": claim["character"]["id"], "blend": blend})
+        score = run_blender("fc_rig_score.py", {"id": claim["character"]["id"], "blend": blend})
+        score["rest_offset_deg"] = retarget.get("rest_offset_deg")
+        return score
     finally:
         for name in ("animated.blend", "animated.blend1"):
             path = os.path.join(rig_dir, name)
@@ -531,7 +540,16 @@ def score_rig(claim, rig_dir, clip):
 
 
 def choose_rig(candidates):
-    """Vybere rig s nejmensim prumernym natazenim hran.
+    """Vybere rig, ktery klip reprodukuje - a teprve mezi takovymi ten s
+    nejmensim natazenim hran.
+
+    Natazeni samo nestaci: retarget miri kosti tam, kam miri ve zdroji, takze
+    kdyz ma rig klidovou pozu jinde nez Mixamo kostra (rest_offset_deg), mesh
+    se o ten rozdil natoci navic v kazdem snimku - postava se hrbi a kolena
+    krci vic nez mannequin, a hrany se pritom netrhaji, takze stretch to
+    nevidi. Zmereno 2026-09-16 na tancici figurce: MIA rig 27 stupnu na
+    stehnech (stretch 1.108) proti sablone 4 stupne (1.133) - vyhral MIA a
+    vysledek byl viditelne v predklonu (plan sekce 16).
 
     candidates: {jmeno: {"report", "score", "error"}}. Rig bez skore (selhal
     klip nebo mereni) prohrava s kazdym, ktery skore ma; kdyz nema skore
@@ -542,9 +560,16 @@ def choose_rig(candidates):
         return None
     scored = {n: c["score"]["stretch_mean"] for n, c in built.items()
               if c.get("score") and c["score"].get("stretch_mean") is not None}
-    if scored:
-        return min(scored, key=lambda n: (scored[n], n != "template"))
-    return "template" if "template" in built else sorted(built)[0]
+    if not scored:
+        return "template" if "template" in built else sorted(built)[0]
+
+    def aligned(name):
+        off = (built[name].get("score") or {}).get("rest_offset_deg")
+        return off is None or off <= REST_OFFSET_MAX   # bez mereni se rig nediskvalifikuje
+
+    ok = [n for n in scored if aligned(n)]
+    pool = ok or list(scored)          # kdyz neprojde nikdo, rozhoduje jako driv natazeni
+    return min(pool, key=lambda n: (scored[n], n != "template"))
 
 
 def install_rig(claim, rig_dir, extra):

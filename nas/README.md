@@ -114,7 +114,7 @@ headless Blender na JODA:
 | `char.preprocess` | Spark | RMBG (`fc_preprocess.json`); podle DWPose gated domyšlení nohou (FLUX Fill) a A-pose (Wan 2.2 Animate podle `worker/assets/apose_driver.png`, po něm kontrola DWPose, Kontext jen jako záloha), viz `fc_pose.py` a plán §14–15 |
 | `char.mesh` | Spark | ComfyUI `fc_mesh.json` (TRELLIS) |
 | `char.clean` | JODA | `fc_cleanup.py` — decimate, atlas, výška 1.8 m, pivot na zem |
-| `char.rig` | JODA + Spark | `FC_RIG=auto`: šablona (`fc_rig_template.py`) i MIA (`fc_rig_mia.py`), vyhraje menší natažení při prvním klipu (`fc_rig_score.py`) |
+| `char.rig` | JODA + Spark | `FC_RIG=auto`: šablona (`fc_rig_template.py`) i MIA (`fc_rig_mia.py`); vyhraje menší natažení při prvním klipu (`fc_rig_score.py`), ale jen mezi rigy, jejichž klidová póza je do `FC_RIG_REST_OFFSET_MAX` (10°) od Mixamo kostry — jinak se postava v každém snímku hrbí, viz plán §16 |
 | `char.animate` | JODA | `fc_retarget.py` — klipy na jednu timeline + NLA tracky |
 | `char.export.user` | JODA | `fc_export.py` — GLB, FBX, turntable mp4, thumb |
 | `char.export.roblox` | JODA | `fc_roblox_pack.py` — ≤10k tris, 4 váhy/vertex, ≤256 kostí |

@@ -286,6 +286,29 @@ class TestChooseRig(unittest.TestCase):
     def test_all_failed_is_none(self):
         self.assertIsNone(fc_worker.choose_rig({"template": {"error": "x"}, "mia": {"error": "y"}}))
 
+    def test_misaligned_rest_pose_loses_even_with_lower_stretch(self):
+        # tancici figurka 2026-09-16: MIA melo mensi natazeni, ale klidovou
+        # pozu 26.7 stupne od Mixama - v animaci se hrbila
+        c = {"template": {"score": {"stretch_mean": 1.133, "rest_offset_deg": 3.9}},
+             "mia": {"score": {"stretch_mean": 1.108, "rest_offset_deg": 26.7}}}
+        self.assertEqual(fc_worker.choose_rig(c), "template")
+
+    def test_aligned_rest_pose_still_decided_by_stretch(self):
+        c = {"template": {"score": {"stretch_mean": 1.33, "rest_offset_deg": 3.9}},
+             "mia": {"score": {"stretch_mean": 1.20, "rest_offset_deg": 7.0}}}
+        self.assertEqual(fc_worker.choose_rig(c), "mia")
+
+    def test_all_misaligned_falls_back_to_stretch(self):
+        c = {"template": {"score": {"stretch_mean": 1.40, "rest_offset_deg": 21.0}},
+             "mia": {"score": {"stretch_mean": 1.20, "rest_offset_deg": 26.7}}}
+        self.assertEqual(fc_worker.choose_rig(c), "mia")
+
+    def test_missing_measurement_does_not_disqualify(self):
+        # starsi postavy a fixture bez rest_offset_deg se chovaji jako driv
+        c = {"template": {"score": {"stretch_mean": 1.33}},
+             "mia": {"score": {"stretch_mean": 1.20}}}
+        self.assertEqual(fc_worker.choose_rig(c), "mia")
+
 
 class TestStepRigAuto(unittest.TestCase):
     """Orchestrace auto rezimu bez Blenderu a ComfyUI: stavebni kroky jsou
