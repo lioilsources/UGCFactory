@@ -607,3 +607,76 @@ seznam aplikovaných kroků.
 Checkbox v appce („Pripravit fotku", dřív „Auto A-pose") teď popisuje, co
 dělá — odstranění pozadí je pořád jeho hlavní, vždy platná funkce; A-pose
 a outpaint jsou uvnitř gated navíc.
+
+## 15. Kontext paže neodtáhne — A-pose přes Wan 2.2 Animate (měřeno 2026-09-16)
+
+Po nasazení §14 a přegenerování 10 postav zůstaly blány mezi pažemi a
+trupem. DWPose na výstupech Kontextu (12 postav, `pose_apose.png`):
+
+| postava | zdroj mezera / úhel | po Kontextu | mesh |
+|---|---|---|---|
+| shorts | 0,50 / 4° | 1,18 / 24° | paže oddělené |
+| Test Knight | 0,81 / 15° | 1,09 / 26° | oddělené |
+| foto 2, busty blonde | 0,54 / 3°, 0,75 / 10° | 1,02 / 19°, 1,02 / 18° | oddělené |
+| golden Teresa, ilustrace | 0,70 / 12° | 0,95 / 13° | paže podél těla, stretch 1,40, p999 13,7 |
+| obraz | 0,56 / 5° | 0,89 / 11° | srostlé |
+| Ol1nLLM ab517774 | 0,41 / 49° (ruka za hlavou) | 0,78 / 10° (I-póza) | srostlé |
+| Ol1nLLM d5a0044f | 0,60 / 9° | 0,58 / 7° | beze změny |
+| albine, Ol1nLLM b853874d, silonky | ruce na bocích / u obličeje | beze změny | srostlé |
+
+Tedy **4 z 12**. Kontext s promptem „keep this exact person unchanged …
+change only the pose" buď nezmění nic, nebo paže srovná dolů k tělu — pro
+TRELLIS stejně špatné. Sweep na Terese (prompt současný / důrazný „clear
+visible gap between each arm and the torso", guidance 2,5 / 4,0, seed 11 /
+47): všech 8 variant 10–14°. Není to seedem ani guidance, Kontext to na
+takových vstupech neumí. A pipeline výstup nekontrolovala — gate 0,85 by
+Teresu (0,95) pustil dál jako opravenou.
+
+Dvě opravy:
+
+1. **Kontrola po přepózování** (`fc_pose.apose_accepted`): DWPose znovu na
+   výstupu, přijme se jen úhel paže ≥ 18° **a** mezera zápěstí ≥ 1,0 —
+   hranice oddělují přesně ty 4 dobré od 8 špatných. Když neprojde nic,
+   vezme se kandidát s největší mezerou, ale jen je-li lepší než zdroj
+   (`pick_reshape`); jinak zůstane zdroj.
+2. **Wan 2.2 Animate místo Kontextu** (`fc_pose.repose_graph`): model na
+   Sparku (`wan2.2_animate_14B_fp8_scaled`, lightx2v distil LoRA, 4 kroky)
+   přerenderuje postavu z reference do pózy zadané kostrou — to je jeho
+   účel, tvar, oblečení, tetování i pozadí drží (ArcFace k originálu Teresy
+   0,74–0,77; Kontext 0,40). Kostra přijde z **řídicí A-pose fotky**
+   (`worker/assets/apose_driver.png`) přes `PoseAndFaceDetection` s
+   retargetem na proporce reference + `DrawViTPose`
+   (ComfyUI-WanAnimatePreprocess). Výsledek na 4 selhaných postavách:
+
+   | postava | Wan: mezera / úhel | ArcFace |
+   |---|---|---|
+   | golden Teresa | 1,75 / 45,5° | 0,74–0,77 |
+   | silonky (ruce u obličeje) | 1,39 / 44,9° | 0,35 (tvář zakrytá vlasy, nespolehlivé) |
+   | Ol1nLLM ab517774 (ruka za hlavou) | 1,58 / 45,5° | — |
+   | Ol1nLLM d5a0044f | 1,54 / 45,6° | — |
+
+   Kontext zůstává jen jako záloha, když Wan spadne nebo neprojde kontrolou.
+
+Slepé uličky cestou (ať se neopakují):
+
+- **Řídicí fotka z FLUX text2img** — FLUX popis pózy ignoruje stejně jako
+  Kontext (paže 5°, nohy u sebe).
+- **Y-bot z Mixamo FBX vyrenderovaný v A-póze** (`fc_apose_driver.py`,
+  paže 45°, stehna 10°): DWPose ho čte správně (46°, mezera 1,74), ale
+  ViTPose v `PoseAndFaceDetection` mu na symetrické figuríně **prohodí levou
+  a pravou nohu** — kostra má nohy překřížené (i bez retargetu) a Wan podle
+  ní překříží nohy postavě. Proto je řídicí fotka **člověk**: Y-bot →
+  DWPose (`bbox_detector: None`, yolox figurínu nenajde a s ním je
+  ControlNet obrázek prázdný) → FLUX dev + `flux1-dev-controlnet-union-pro-2`
+  (strength 0,7, end 0,6, 768×1344, seed 11) → fotka ženy v A-póze, paže
+  47°, kotníky 1,61, ViTPose kostra bez překřížení.
+- **Reference bez outpaintu** (poloviční fotka, retarget zapnutý): retarget
+  napasuje kostru na viditelné tělo, paže vyjedou z rámu a nohy nejsou.
+  Pořadí zůstává outpaint → Wan.
+- **Bez retargetu** funguje také (proporce driveru místo reference); zapnutý
+  retarget je oficiální chování a proporce postavy drží lépe.
+
+Cena: Wan ~80 s na postavu, když je GPU volné (~200 s vedle Tsumiki jobů),
+plus DWPose kontrola. Výstup je 480×832 (nativní 480p), TRELLIS si vstup
+stejně zmenšuje na 518 px. Stehna u sebe: kostra driveru je má 10° od sebe,
+takže Wan je rozdělí — vedlejší zisk oproti §14.

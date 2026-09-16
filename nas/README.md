@@ -111,7 +111,7 @@ headless Blender na JODA:
 
 | Krok | Kde | Čím |
 |---|---|---|
-| `char.preprocess` | Spark | RMBG (`fc_preprocess.json`); podle DWPose gated A-pose (FLUX Kontext) a domyšlení nohou (FLUX Fill), viz `fc_pose.py` a plán §14 |
+| `char.preprocess` | Spark | RMBG (`fc_preprocess.json`); podle DWPose gated domyšlení nohou (FLUX Fill) a A-pose (Wan 2.2 Animate podle `worker/assets/apose_driver.png`, po něm kontrola DWPose, Kontext jen jako záloha), viz `fc_pose.py` a plán §14–15 |
 | `char.mesh` | Spark | ComfyUI `fc_mesh.json` (TRELLIS) |
 | `char.clean` | JODA | `fc_cleanup.py` — decimate, atlas, výška 1.8 m, pivot na zem |
 | `char.rig` | JODA + Spark | `FC_RIG=auto`: šablona (`fc_rig_template.py`) i MIA (`fc_rig_mia.py`), vyhraje menší natažení při prvním klipu (`fc_rig_score.py`) |

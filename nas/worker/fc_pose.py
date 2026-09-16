@@ -33,6 +33,16 @@ CONF_MIN = 0.3
 # pripady - vetsina fotek ma ruce dole, takze se tenhle krok spusti casto.
 ARM_GATE_WRIST_GAP = 0.85
 
+# Kdy je vystup prepozovani opravdu A-poza. Zmereno 2026-09-16 na 12
+# postavach (DWPose na vystupu Kontextu): ctyri, ktere dopadly dobre (mesh
+# s oddelenymi pazemi), mely uhel paze 18-26 stupnu a mezeru zapesti
+# 1.02-1.18; osm spatnych (paze dal podel tela nebo beze zmeny) 7-14 stupnu
+# a mezeru do 0.95 - nebo velky uhel s malou mezerou (ruka na boku, za
+# hlavou). Obe podminky zaroven. Samotny gate ARM_GATE_WRIST_GAP nestaci:
+# 0.95 projde, a paze jsou pritom prilepene.
+APOSE_MIN_ARM_ANGLE = 18.0
+APOSE_MIN_WRIST_GAP = 1.0
+
 # Kolik nasobku trupu sahaji nohy pod boky - z Mixamo kostry (stehno+holen)
 # / trup = 1.92, plus chodidlo a rezerva. Urcuje, o kolik pixelu dole se
 # vyplati outpaintovat, kdyz kotniky nejsou videt.
@@ -56,6 +66,16 @@ OUTPAINT_LEGS_PROMPT = (
 # Pevny seed z experimentu 2026-09-15 (fc_pose_exp.py) - cislo samo nema
 # vyznam, ale pevny znamena, ze retry dava stejny vysledek.
 POSE_FIX_SEED = 11
+
+# Wan Animate prepozovani (repose_graph): 480x832 je nativni 480p rozliseni
+# modelu na vysku; TRELLIS si vstup stejne zmensuje na 518 px, takze o
+# detail se neprichazi. 5 snimku = nejkratsi delka 4k+1, vsechny stejna poza.
+REPOSE_W, REPOSE_H = 480, 832
+REPOSE_FRAMES = 5
+REPOSE_PROMPT = (
+    "the same person standing still in an A-pose, arms held straight out away "
+    "from the body, facing the camera, full body, sharp, high quality"
+)
 
 
 def parse_pose_keypoints(saved_json, width, height):
@@ -128,6 +148,24 @@ def needs_arm_reshape(metrics):
     if "error" in metrics or "wrist_gap_min" not in metrics:
         return False
     return metrics["wrist_gap_min"] < ARM_GATE_WRIST_GAP
+
+
+def apose_accepted(metrics):
+    """Vystup prepozovani se bere jen kdyz jsou paze opravdu od tela - jinak
+    by TRELLIS dostal stejne srostlou postavu jako predtim (jen jinak
+    nakreslenou) a cely krok by byl k nicemu."""
+    if "error" in metrics or "arm_angle_deg" not in metrics:
+        return False
+    return (metrics["arm_angle_deg"] >= APOSE_MIN_ARM_ANGLE
+            and metrics["wrist_gap_min"] >= APOSE_MIN_WRIST_GAP)
+
+
+def apose_score(metrics):
+    """Poradi kandidatu, kdyz zadny neprosel apose_accepted: vetsi mezera
+    zapesti = mene srustu (to je to, na cem TRELLIS ztroskota)."""
+    if "error" in metrics or "wrist_gap_min" not in metrics:
+        return -1.0
+    return metrics["wrist_gap_min"]
 
 
 def outpaint_bottom_px(metrics, image_height):
@@ -248,3 +286,80 @@ def kontext_graph(image, prompt, seed, prefix):
                         "width": ["5", 0], "height": ["5", 1], "crop": "disabled"}},
         "20": {"class_type": "SaveImage", "inputs": {"images": ["14", 0], "filename_prefix": prefix}},
     }
+
+
+def repose_graph(reference, driver, seed, prefix, frames=REPOSE_FRAMES, retarget=True):
+    """Wan 2.2 Animate jako prepozovani: postava z `reference` se
+    prerenderuje do pozy, kterou ma clovek na `driver` (ridici A-pose fotka,
+    assets/apose_driver.png). Model je na to stavany - drzi tvar, oblecani i
+    pozadi (ArcFace 0.74-0.77 k originalu), a pozu prevezme presne (paze 45
+    stupnu, zatimco Kontext je tahal na 10-14 a pipeline to nepoznala).
+    Zapojeni podle ComfyUI-WanAnimatePreprocess/example_workflows/
+    WanAnimate_native_example_01.json v rezimu animace (bez pozadi a masky);
+    lightx2v distil LoRA = 4 kroky, cfg 1. Jedna poza = `frames` stejnych
+    snimku (video model chce 4k+1), bere se posledni.
+
+    `retarget` napasuje kostru z driveru na proporce reference (oficialni
+    retarget_pose); bez nej ma vystup proporce driveru."""
+    resize = {"width": REPOSE_W, "height": REPOSE_H, "upscale_method": "lanczos", "keep_proportion": "pad",
+              "pad_color": "128, 128, 128", "crop_position": "center", "divisible_by": 16, "device": "cpu"}
+    detect = {"model": ["10", 0], "images": ["9", 0], "width": REPOSE_W, "height": REPOSE_H, "face_padding": 0}
+    if retarget:
+        detect["retarget_image"] = ["8", 0]
+    return {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": "wan2.2_animate_14B_fp8_scaled_e4m3fn.safetensors", "weight_dtype": "default"}},
+        "2": {"class_type": "LoraLoaderModelOnly",
+              "inputs": {"model": ["1", 0], "strength_model": 1.2,
+                         "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"}},
+        "3": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+        "5": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}},
+        "6": {"class_type": "LoadImage", "inputs": {"image": reference, "upload": "image"}},
+        "7": {"class_type": "LoadImage", "inputs": {"image": driver, "upload": "image"}},
+        "8": {"class_type": "ImageResizeKJv2", "inputs": {"image": ["6", 0], **resize}},
+        "9": {"class_type": "ImageResizeKJv2", "inputs": {"image": ["7", 0], **resize}},
+        "10": {"class_type": "OnnxDetectionModelLoader",
+               "inputs": {"vitpose_model": "vitpose-l-wholebody.onnx", "yolo_model": "yolov10m.onnx",
+                          "onnx_device": "CUDAExecutionProvider"}},
+        "11": {"class_type": "PoseAndFaceDetection", "inputs": detect},
+        "12": {"class_type": "DrawViTPose",
+               "inputs": {"pose_data": ["11", 0], "width": REPOSE_W, "height": REPOSE_H, "retarget_padding": 16,
+                          "body_stick_width": -1, "hand_stick_width": -1, "draw_head": True}},
+        "13": {"class_type": "RepeatImageBatch", "inputs": {"image": ["12", 0], "amount": frames}},
+        "14": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["5", 0], "image": ["8", 0], "crop": "none"}},
+        "15": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": REPOSE_PROMPT}},
+        "16": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["15", 0]}},
+        "17": {"class_type": "WanAnimateToVideo",
+               "inputs": {"positive": ["15", 0], "negative": ["16", 0], "vae": ["4", 0],
+                          "width": REPOSE_W, "height": REPOSE_H, "length": frames, "batch_size": 1,
+                          "continue_motion_max_frames": 5, "video_frame_offset": 0,
+                          "clip_vision_output": ["14", 0], "reference_image": ["8", 0], "pose_video": ["13", 0]}},
+        "18": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+        "19": {"class_type": "CFGGuider",
+               "inputs": {"model": ["2", 0], "positive": ["17", 0], "negative": ["17", 1], "cfg": 1.0}},
+        "20": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "lcm"}},
+        "21": {"class_type": "BasicScheduler",
+               "inputs": {"model": ["2", 0], "scheduler": "simple", "steps": 4, "denoise": 1.0}},
+        "22": {"class_type": "SamplerCustomAdvanced",
+               "inputs": {"noise": ["18", 0], "guider": ["19", 0], "sampler": ["20", 0], "sigmas": ["21", 0],
+                          "latent_image": ["17", 2]}},
+        "23": {"class_type": "TrimVideoLatent", "inputs": {"samples": ["22", 0], "trim_amount": ["17", 3]}},
+        "24": {"class_type": "VAEDecode", "inputs": {"samples": ["23", 0], "vae": ["4", 0]}},
+        "30": {"class_type": "SaveImage", "inputs": {"images": ["24", 0], "filename_prefix": prefix}},
+    }
+
+
+def pick_reshape(source_metrics, candidates):
+    """Ktery vystup prepozovani pouzit. `candidates` = [(jmeno, metriky), ...]
+    v poradi, jak vznikly. Prvni prijaty (apose_accepted) vyhrava; kdyz
+    neprosel zadny, bere se ten s nejvetsi mezerou zapesti, ale jen pokud je
+    lepsi nez zdroj - jinak None (= nechat zdroj, prepozovani nepomohlo)."""
+    for name, m in candidates:
+        if apose_accepted(m):
+            return name
+    best = max(candidates, key=lambda c: apose_score(c[1]), default=None)
+    if best is None or apose_score(best[1]) <= apose_score(source_metrics):
+        return None
+    return best[0]

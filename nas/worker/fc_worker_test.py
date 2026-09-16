@@ -6,6 +6,7 @@ Blenderove a ComfyUI kroky se takhle otestovat nedaji - ty overuje az
 golden test v kontejneru, resp. beh proti Sparku.
 """
 import json
+import math
 import os
 import sys
 import tempfile
@@ -356,6 +357,95 @@ class TestStepRigAuto(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             fc_worker.step_rig(self.claim)
         self.assertIn("ComfyUI nedobehl", str(ctx.exception))
+
+
+class TestReshapeArms(unittest.TestCase):
+    """Orchestrace A-pozy bez ComfyUI: Wan Animate prvni, po nem mereni,
+    Kontext jen kdyz Wan neprojde, a kdyz nepomuze nic, zustava zdroj."""
+
+    ACCEPTED = {"arm_angle_deg": 45.5, "wrist_gap_min": 1.75, "ankles_visible": True}
+    WEAK = {"arm_angle_deg": 13.1, "wrist_gap_min": 0.95, "ankles_visible": True}
+    SRC = {"arm_angle_deg": 12.0, "wrist_gap_min": 0.70}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.saved = {n: getattr(fc_worker, n) for n in ("comfy_upload", "comfy_submit", "comfy_fetch", "detect_pose")}
+        self.labels = []
+        self.by_file = {}          # jmeno stazeneho souboru -> co ma DWPose "namerit"
+        self.failing = set()       # popisky jobu, ktere maji spadnout
+        fc_worker.comfy_upload = lambda path: "up/" + os.path.basename(path)
+        fc_worker.comfy_submit = self.submit
+        fc_worker.comfy_fetch = self.fetch
+        fc_worker.detect_pose = self.detect
+
+    def tearDown(self):
+        for n, v in self.saved.items():
+            setattr(fc_worker, n, v)
+
+    def submit(self, graph, label, timeout=None):
+        self.labels.append(label)
+        if label in self.failing:
+            raise RuntimeError(f"ComfyUI: {label} spadl")
+        prefix = next(n["inputs"]["filename_prefix"] for n in graph.values() if n["class_type"] == "SaveImage")
+        # Wan vraci vic snimku - bere se posledni podle jmena
+        return [(f"{prefix}_0000{i}_.png", "fc", "output") for i in (1, 2, 3)]
+
+    def fetch(self, entry, dst):
+        with open(dst, "w") as f:
+            f.write(entry[0])
+        return dst
+
+    def detect(self, out_dir, path, kps_name="pose_kps.json"):
+        m = self.by_file[os.path.basename(path)]
+        return (fc_pose_kps(m), 100, 200)
+
+    def test_wan_accepted_skips_kontext(self):
+        self.by_file["pose_repose.png"] = self.ACCEPTED
+        out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
+        self.assertEqual(os.path.basename(out), "pose_repose.png")
+        self.assertEqual(stage["choice"], "wan_repose")
+        self.assertEqual(self.labels, ["A-pose (Wan Animate)"])
+        with open(out) as f:
+            self.assertEqual(f.read(), "fc/repose_00003_.png")   # posledni snimek
+
+    def test_wan_failure_falls_back_to_kontext(self):
+        self.failing.add("A-pose (Wan Animate)")
+        self.by_file["pose_apose.png"] = self.WEAK
+        out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
+        self.assertEqual(os.path.basename(out), "pose_apose.png")   # lepsi nez zdroj, i kdyz neprijaty
+        self.assertEqual(stage["choice"], "kontext_apose")
+        self.assertIn("spadl", stage["candidates"][0]["error"])
+        self.assertEqual(self.labels, ["A-pose (Wan Animate)", "A-pose (Kontext)"])
+
+    def test_nothing_better_keeps_the_source(self):
+        self.by_file["pose_repose.png"] = {"arm_angle_deg": 6.7, "wrist_gap_min": 0.58}
+        self.by_file["pose_apose.png"] = {"error": "chybi ramena nebo boky"}
+        out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
+        self.assertEqual(out, "/x/src.png")
+        self.assertIsNone(stage["choice"])
+        self.assertEqual([c["name"] for c in stage["candidates"]], ["wan_repose", "kontext_apose"])
+
+
+def fc_pose_kps(metrics):
+    """18 kloubu, ktere fc_pose.pose_metrics prelozi zpet na dane metriky
+    (ramena 100 px od sebe, osa trupu svisla; "error" = boky bez confidence)."""
+    kps = [(0, 0, 0.0)] * 18
+    kps[1] = (100, 60, 0.9)
+    kps[2], kps[5] = (50, 65, 0.9), (150, 65, 0.9)
+    if "error" in metrics:
+        return kps
+    kps[8], kps[11] = (85, 220, 0.9), (115, 220, 0.9)
+    ang = math.radians(metrics["arm_angle_deg"])
+    gap = metrics["wrist_gap_min"] * 100
+    for sho, elb, wri, sign in ((2, 3, 4, -1), (5, 6, 7, 1)):
+        kps[elb] = (kps[sho][0] + sign * 50 * math.sin(ang), 65 + 50 * math.cos(ang), 0.9)
+        # zapesti presne `gap` od osy (x=100), uhel od ramene sedi na arm_angle
+        wx = 100 + sign * gap
+        wy = 65 + abs(wx - kps[sho][0]) / math.tan(ang) if ang > 0 else 65 + 100
+        kps[wri] = (wx, wy, 0.9)
+    if metrics.get("ankles_visible"):
+        kps[10], kps[13] = (85, 420, 0.9), (115, 420, 0.9)
+    return kps
 
 
 class TestSavePoseKpsFilename(unittest.TestCase):

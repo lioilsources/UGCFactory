@@ -90,6 +90,25 @@ class TestGates(unittest.TestCase):
         self.assertFalse(fc_pose.needs_leg_outpaint(m))
 
 
+class TestAposeAcceptance(unittest.TestCase):
+    # hodnoty z mereni 2026-09-16 (DWPose na vystupech Kontextu)
+    def test_needs_both_angle_and_wrist_gap(self):
+        self.assertTrue(fc_pose.apose_accepted({"arm_angle_deg": 24.2, "wrist_gap_min": 1.18}))   # shorts
+        self.assertTrue(fc_pose.apose_accepted({"arm_angle_deg": 18.2, "wrist_gap_min": 1.02}))   # busty blonde
+        self.assertFalse(fc_pose.apose_accepted({"arm_angle_deg": 13.1, "wrist_gap_min": 0.95}))  # Teresa: paze u tela
+        self.assertFalse(fc_pose.apose_accepted({"arm_angle_deg": 41.5, "wrist_gap_min": 0.68}))  # albine: ruce na bocich
+        self.assertFalse(fc_pose.apose_accepted({"arm_angle_deg": 10.4, "wrist_gap_min": 1.06}))  # mezera ano, uhel ne
+
+    def test_error_or_missing_arms_is_rejected(self):
+        self.assertFalse(fc_pose.apose_accepted({"error": "chybi ramena nebo boky"}))
+        self.assertFalse(fc_pose.apose_accepted({"shoulder_w": 100.0, "ankles_visible": True}))
+
+    def test_score_prefers_the_wider_wrist_gap_and_sinks_errors(self):
+        cands = [{"error": "x"}, {"wrist_gap_min": 0.58}, {"wrist_gap_min": 0.95}]
+        self.assertEqual(max(cands, key=fc_pose.apose_score), cands[2])
+        self.assertLess(fc_pose.apose_score(cands[0]), fc_pose.apose_score(cands[1]))
+
+
 class TestOutpaintBottom(unittest.TestCase):
     def test_rounds_up_to_a_multiple_of_16(self):
         # floor_y = hip_y(1000) + 2.2*torso(300) = 1660; vyska obrazku 1400
@@ -187,6 +206,38 @@ class TestGraphs(unittest.TestCase):
         self.assertEqual(g["8"]["inputs"]["text"], "A-pose")
         self.assertEqual(g["12"]["inputs"]["seed"], 11)
         self.assertEqual(g["20"]["inputs"]["filename_prefix"], "fc/apose")
+
+    def test_repose_graph_wires_reference_driver_and_retarget(self):
+        g = fc_pose.repose_graph("ref.png", "driver.png", 11, "fc/repose")
+        self.assertEqual(g["6"]["inputs"]["image"], "ref.png")
+        self.assertEqual(g["7"]["inputs"]["image"], "driver.png")
+        self.assertEqual(g["11"]["inputs"]["retarget_image"], ["8", 0])   # kostra na proporce reference
+        self.assertEqual(g["17"]["inputs"]["length"], fc_pose.REPOSE_FRAMES)
+        self.assertEqual(g["13"]["inputs"]["amount"], fc_pose.REPOSE_FRAMES)
+        self.assertEqual(g["18"]["inputs"]["noise_seed"], 11)
+        self.assertEqual(g["30"]["inputs"]["filename_prefix"], "fc/repose")
+        # bez retargetu se reference do detekce vubec nezapoji
+        self.assertNotIn("retarget_image", fc_pose.repose_graph("r", "d", 1, "p", retarget=False)["11"]["inputs"])
+
+
+class TestPickReshape(unittest.TestCase):
+    SRC = {"arm_angle_deg": 12.0, "wrist_gap_min": 0.70}   # Teresa pred opravou
+
+    def test_first_accepted_candidate_wins_without_looking_further(self):
+        cands = [("wan_repose", {"arm_angle_deg": 45.5, "wrist_gap_min": 1.75}),
+                 ("kontext_apose", {"arm_angle_deg": 24.0, "wrist_gap_min": 1.9})]
+        self.assertEqual(fc_pose.pick_reshape(self.SRC, cands), "wan_repose")
+
+    def test_unaccepted_but_wider_than_source_is_still_used(self):
+        cands = [("wan_repose", {"error": "ComfyUI: chybi model"}),
+                 ("kontext_apose", {"arm_angle_deg": 13.1, "wrist_gap_min": 0.95})]
+        self.assertEqual(fc_pose.pick_reshape(self.SRC, cands), "kontext_apose")
+
+    def test_nothing_better_than_source_means_keep_source(self):
+        cands = [("wan_repose", {"error": "x"}),
+                 ("kontext_apose", {"arm_angle_deg": 6.7, "wrist_gap_min": 0.58})]
+        self.assertIsNone(fc_pose.pick_reshape(self.SRC, cands))
+        self.assertIsNone(fc_pose.pick_reshape(self.SRC, []))
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ COPY worker/worker.py /app/worker.py
 COPY worker/fc_worker.py /app/fc_worker.py
 COPY worker/fc_pose.py /app/fc_pose.py
 COPY worker/seed_animlib.py /app/seed_animlib.py
+COPY worker/assets/ /app/assets/
 COPY workflows/ /app/workflows/
 
 ENV UGC_API=http://ugc-api:8095 UGC_DATA=/data

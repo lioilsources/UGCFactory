@@ -39,6 +39,9 @@ PREVIEW_MODE = os.environ.get("FC_PREVIEW", "thumb")
 # Ani jedna nevyhrava vzdy - MIA u fotek cele postavy, sablona u brneni s
 # plastem a orezanych postav - takze 'auto' udela obe a vybere podle skore.
 RIG_MODE = os.environ.get("FC_RIG", "auto")
+# Ridici A-pose fotka pro Wan Animate (fc_pose.repose_graph) - jak vznikla,
+# viz blender_scripts/fc_apose_driver.py a docs/FANTASYCHARACTER_PLAN.md 14.
+APOSE_DRIVER = os.environ.get("FC_APOSE_DRIVER", "/app/assets/apose_driver.png")
 # V rezimu auto je MIA jen jedna z moznosti; kdyz ComfyUI ceka na cizi ulohy,
 # nema smysl drzet pipeline pul hodiny - sablona je hotova za par sekund.
 RIG_MIA_TIMEOUT = int(os.environ.get("FC_RIG_MIA_TIMEOUT", "300"))
@@ -368,17 +371,55 @@ def fix_pose(out_dir, image_path):
             stages.append({"stage": "leg_outpaint", "bottom_px": bottom})
 
     if fc_pose.needs_arm_reshape(metrics):
-        uploaded = comfy_upload(current)
-        graph = fc_pose.kontext_graph(uploaded, fc_pose.KONTEXT_APOSE_PROMPT,
-                                      fc_pose.POSE_FIX_SEED, "fc/apose")
-        outs = comfy_submit(graph, "A-pose (Kontext)")
-        current = comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_apose.png"))
-        stages.append({"stage": "kontext_apose"})
+        current, stage = reshape_arms(out_dir, current, metrics)
+        stages.append(stage)
 
     return {"metrics": metrics, "stages": stages, "current": current}
 
 
-def detect_pose(out_dir, image_path):
+def reshape_arms(out_dir, image_path, source_metrics):
+    """Odtahne paze od tela: Wan Animate prepozovani (pose_repose.png), a
+    protoze zadny generator neposlechne vzdy, vystup se znovu zmeri DWPose.
+    Kontext (pose_apose.png) uz jen jako zaloha, kdyz Wan neprojde - sam
+    o sobe uspel u 4 z 12 postav (plan sekce 14). Vraci (obrazek, zaznam do
+    reportu); obrazek je puvodni, kdyz zadny kandidat neni lepsi nez zdroj."""
+    candidates, files = [], {}
+
+    def measure(name, path):
+        kps, _, _ = detect_pose(out_dir, path, f"pose_kps_{name}.json")
+        m = fc_pose.pose_metrics(kps) if kps is not None else {"error": "DWPose nikoho nenasel"}
+        candidates.append((name, m))
+        files[name] = path
+        print(f"  preprocess: {name} -> {m}", flush=True)
+
+    try:
+        uploaded, driver = comfy_upload(image_path), comfy_upload(APOSE_DRIVER)
+        graph = fc_pose.repose_graph(uploaded, driver, fc_pose.POSE_FIX_SEED, "fc/repose")
+        outs = comfy_submit(graph, "A-pose (Wan Animate)")
+        last = max((o for o in outs if o[0].lower().endswith(".png")), key=lambda o: o[0])
+        measure("wan_repose", comfy_fetch(last, os.path.join(out_dir, "pose_repose.png")))
+    except Exception as e:
+        candidates.append(("wan_repose", {"error": str(e)[:300]}))
+        print(f"  preprocess: Wan Animate selhal ({candidates[-1][1]['error']})", flush=True)
+
+    if not any(fc_pose.apose_accepted(m) for _, m in candidates):
+        try:
+            uploaded = comfy_upload(image_path)
+            graph = fc_pose.kontext_graph(uploaded, fc_pose.KONTEXT_APOSE_PROMPT,
+                                          fc_pose.POSE_FIX_SEED, "fc/apose")
+            outs = comfy_submit(graph, "A-pose (Kontext)")
+            measure("kontext_apose", comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_apose.png")))
+        except Exception as e:
+            candidates.append(("kontext_apose", {"error": str(e)[:300]}))
+            print(f"  preprocess: Kontext selhal ({candidates[-1][1]['error']})", flush=True)
+
+    choice = fc_pose.pick_reshape(source_metrics, candidates)
+    stage = {"stage": "arm_reshape", "choice": choice,
+             "candidates": [{"name": n, **m} for n, m in candidates]}
+    return (files[choice] if choice else image_path), stage
+
+
+def detect_pose(out_dir, image_path, kps_name="pose_kps.json"):
     """DWPose na lokalnim souboru; bez bbox detektoru je pomalejsi, ale
     najde i postavy, ktere yolox mine (stejna zachrana jako tools/drive.py
     ve video-stacku). Vraci (klouby, sirka, vyska) nebo (None, sirka, vyska),
@@ -388,7 +429,7 @@ def detect_pose(out_dir, image_path):
         uploaded = comfy_upload(image_path)
         graph = fc_pose.pose_graph(uploaded, "fc/pose", bbox)
         outs = comfy_submit(graph, f"pose detect ({bbox})")
-        path = comfy_fetch(pick_output(outs, ".json"), os.path.join(out_dir, "pose_kps.json"))
+        path = comfy_fetch(pick_output(outs, ".json"), os.path.join(out_dir, kps_name))
         with open(path) as f:
             kps = fc_pose.parse_pose_keypoints(json.load(f), w, h)
         if kps is not None:
