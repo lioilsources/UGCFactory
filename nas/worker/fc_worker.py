@@ -44,6 +44,10 @@ RIG_MODE = os.environ.get("FC_RIG", "auto")
 # peti postavach: sablona vzdy 3.9, MIA 14.9-26.7 - a prave u dvou postav,
 # kde MIA vyhral na natazeni, byl vysledek v predklonu.
 REST_OFFSET_MAX = float(os.environ.get("FC_RIG_REST_OFFSET_MAX", "10"))
+# Jak dlouho cekat, nez se restartujici ComfyUI zvedne, nez krok vzdame:
+# 30 pokusu po 20 s = 10 minut (start s nactenim modelu trva pres minutu).
+COMFY_RETRIES = int(os.environ.get("FC_COMFY_RETRIES", "30"))
+COMFY_RETRY_DELAY = int(os.environ.get("FC_COMFY_RETRY_DELAY", "20"))
 # Ridici A-pose fotka pro Wan Animate (fc_pose.repose_graph) - jak vznikla,
 # viz blender_scripts/fc_apose_driver.py a docs/FANTASYCHARACTER_PLAN.md 14.
 APOSE_DRIVER = os.environ.get("FC_APOSE_DRIVER", "/app/assets/apose_driver.png")
@@ -147,13 +151,47 @@ def set_titled_source(workflow, title, value):
     return hits
 
 
+def comfy_wait_until_up(attempts=COMFY_RETRIES, delay=COMFY_RETRY_DELAY):
+    """Pocka, nez se ComfyUI zvedne. Bezi na Sparku, ktery si delime s
+    dalsimi klienty a obcas se restartuje - behem restartu odpovida
+    "Connection refused" a bez cekani by se za par minut sesypala cela
+    fronta (zmereno 2026-09-17: jeden vypadek shodil 13 postav v rade,
+    kazdou po treti neuspesne zkousce)."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(COMFY + "/queue", timeout=30):
+                return True
+        except urllib.error.HTTPError:
+            return True                  # odpovida, jen jinak - to nam staci
+        except Exception as e:           # URLError, socket timeout, reset
+            last = e
+            if attempt + 1 < attempts:
+                print(f"  ComfyUI nedostupne ({e}), zkousim za {delay}s "
+                      f"({attempt + 1}/{attempts})", flush=True)
+                time.sleep(delay)
+    raise RuntimeError(f"ComfyUI nedostupne ani po {attempts} pokusech: {last}")
+
+
+def comfy_open(req, timeout):
+    """urlopen, ktery prezije restart ComfyUI. HTTP chyby (400, 404) jdou
+    dal beze zmeny - to je odpoved serveru, ne vypadek."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError:
+        raise
+    except Exception:
+        comfy_wait_until_up()
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
 def comfy_post(path, payload):
     """ComfyUI vraci duvod odmitnuti (chybejici vstup, neznamy soubor, graf
     bez vystupu) v tele 400 - bez nej v chybe kroku zbyde jen "Bad Request"."""
     req = urllib.request.Request(COMFY + path, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with comfy_open(req, 60) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:800]
@@ -161,7 +199,7 @@ def comfy_post(path, payload):
 
 
 def comfy_get(path):
-    with urllib.request.urlopen(COMFY + path, timeout=60) as resp:
+    with comfy_open(COMFY + path, 60) as resp:
         return json.load(resp)
 
 
@@ -192,7 +230,7 @@ def comfy_upload(path):
     req = urllib.request.Request(
         COMFY + "/upload/image", data=body,
         headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
-    with urllib.request.urlopen(req, timeout=300) as resp:
+    with comfy_open(req, 300) as resp:
         out = json.load(resp)
     sub = out.get("subfolder") or ""
     return "%s/%s" % (sub, out["name"]) if sub else out["name"]
@@ -314,7 +352,7 @@ def collect_outputs(outputs):
 def comfy_fetch(entry, dst):
     filename, subfolder, ftype = entry
     q = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": ftype})
-    with urllib.request.urlopen(f"{COMFY}/view?{q}", timeout=300) as resp, open(dst, "wb") as f:
+    with comfy_open(f"{COMFY}/view?{q}", 300) as resp, open(dst, "wb") as f:
         shutil.copyfileobj(resp, f)
     return dst
 

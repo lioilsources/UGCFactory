@@ -184,6 +184,69 @@ class TestComfyUpload(unittest.TestCase):
                 fc_worker.COMFY = orig_comfy
 
 
+class TestComfyOutage(unittest.TestCase):
+    """Spark si delime s dalsimi klienty; kdyz se ComfyUI restartuje,
+    odpovida Connection refused. 2026-09-17 to za tri minuty shodilo 13
+    postav v rade - krok proto pocka, nez se zvedne."""
+
+    def setUp(self):
+        self.saved = {n: getattr(fc_worker, n) for n in ("COMFY", "COMFY_RETRIES",
+                                                         "COMFY_RETRY_DELAY")}
+        fc_worker.COMFY = "http://spark:8188"
+        fc_worker.COMFY_RETRIES, fc_worker.COMFY_RETRY_DELAY = 3, 0
+        self.orig_open, self.orig_sleep = fc_worker.urllib.request.urlopen, fc_worker.time.sleep
+        fc_worker.time.sleep = lambda s: None
+
+    def tearDown(self):
+        for n, v in self.saved.items():
+            setattr(fc_worker, n, v)
+        fc_worker.urllib.request.urlopen = self.orig_open
+        fc_worker.time.sleep = self.orig_sleep
+
+    def fake(self, failures, payload=b'{"ok": 1}'):
+        """urlopen, ktery prvnich `failures` volani spadne na vypadku."""
+        state = {"n": 0}
+
+        class Resp:
+            status = 200
+
+            def read(self_inner, *a):
+                return payload
+
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *exc):
+                return False
+
+        def opener(req, *a, **kw):
+            state["n"] += 1
+            if state["n"] <= failures:
+                raise fc_worker.urllib.error.URLError("[Errno 111] Connection refused")
+            return Resp()
+
+        fc_worker.urllib.request.urlopen = opener
+        return state
+
+    def test_get_waits_out_a_restart(self):
+        state = self.fake(2)                 # spadne pri volani i pri prvni kontrole
+        self.assertEqual(fc_worker.comfy_get("/history/x"), {"ok": 1})
+        self.assertGreater(state["n"], 2)
+
+    def test_gives_up_after_the_last_attempt(self):
+        self.fake(99)
+        with self.assertRaises(RuntimeError) as ctx:
+            fc_worker.comfy_get("/queue")
+        self.assertIn("nedostupne", str(ctx.exception))
+
+    def test_http_error_is_not_an_outage(self):
+        def opener(req, *a, **kw):
+            raise fc_worker.urllib.error.HTTPError("u", 400, "Bad Request", {}, None)
+        fc_worker.urllib.request.urlopen = opener
+        with self.assertRaises(fc_worker.urllib.error.HTTPError):
+            fc_worker.comfy_open("http://spark:8188/queue", 10)
+
+
 class TestPrefixCandidates(unittest.TestCase):
     """Trellis2ExportMesh nezapise do history nic, takze se soubor musi
     odhadnout z filename_prefix - jinak by krok mesh spadl vzdycky."""
