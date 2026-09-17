@@ -369,15 +369,14 @@ def fix_pose(out_dir, image_path):
     metrics = fc_pose.pose_metrics(kps)
     current = image_path
 
-    if fc_pose.needs_leg_outpaint(metrics):
-        bottom = fc_pose.outpaint_bottom_px(metrics, h)
-        if bottom > 0:
-            uploaded = comfy_upload(current)
-            graph = fc_pose.outpaint_graph(uploaded, bottom, fc_pose.OUTPAINT_LEGS_PROMPT,
-                                           fc_pose.POSE_FIX_SEED, "fc/outpaint")
-            outs = comfy_submit(graph, "leg outpaint")
-            current = comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_outpaint.png"))
-            stages.append({"stage": "leg_outpaint", "bottom_px": bottom})
+    margins = fc_pose.outpaint_margins(metrics, w, h)
+    if any(margins.values()):
+        uploaded = comfy_upload(current)
+        graph = fc_pose.outpaint_graph(uploaded, margins, fc_pose.OUTPAINT_PROMPT,
+                                       fc_pose.POSE_FIX_SEED, "fc/outpaint")
+        outs = comfy_submit(graph, "outpaint " + json.dumps(margins))
+        current = comfy_fetch(pick_output(outs, ".png"), os.path.join(out_dir, "pose_outpaint.png"))
+        stages.append({"stage": "outpaint", **margins})
 
     if fc_pose.needs_arm_reshape(metrics):
         current, stage = reshape_arms(out_dir, current, metrics)

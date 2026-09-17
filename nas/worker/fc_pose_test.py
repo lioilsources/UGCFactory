@@ -52,14 +52,14 @@ class TestPoseMetrics(unittest.TestCase):
         self.assertGreater(m["wrist_gap_min"], 0.85)
         self.assertTrue(m["ankles_visible"])
         self.assertFalse(fc_pose.needs_arm_reshape(m))
-        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+        self.assertEqual(fc_pose.outpaint_margins(m, 200, 500)["bottom"], 0)
 
     def test_fused_arms_and_missing_ankles_trigger_both_gates(self):
         m = fc_pose.pose_metrics(_fused_kps())
         self.assertLess(m["wrist_gap_min"], fc_pose.APOSE_MIN_WRIST_GAP)
         self.assertFalse(m["ankles_visible"])
         self.assertTrue(fc_pose.needs_arm_reshape(m))
-        self.assertTrue(fc_pose.needs_leg_outpaint(m))
+        self.assertGreater(fc_pose.outpaint_margins(m, 200, 500)["bottom"], 0)
 
     def test_confident_ankles_too_close_to_the_hips_are_not_ankles(self):
         # fotka useknuta v pulce stehen: DWPose dal kotniky s confidence 1.0
@@ -71,7 +71,7 @@ class TestPoseMetrics(unittest.TestCase):
         self.assertAlmostEqual(m["leg_ratio"], 0.9, places=1)
         self.assertFalse(m["ankles_visible"])
         self.assertNotIn("ankle_spread", m)
-        self.assertTrue(fc_pose.needs_leg_outpaint(m))
+        self.assertGreater(fc_pose.outpaint_margins(m, 200, 500)["bottom"], 0)
 
     def test_missing_hips_or_shoulders_is_an_error(self):
         kps = _apose_kps()
@@ -79,7 +79,7 @@ class TestPoseMetrics(unittest.TestCase):
         m = fc_pose.pose_metrics(kps)
         self.assertIn("error", m)
         self.assertFalse(fc_pose.needs_arm_reshape(m))
-        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+        self.assertFalse(fc_pose.needs_outpaint(m, 200, 500))
 
     def test_one_arm_missing_still_gives_a_gap_from_the_other(self):
         kps = _apose_kps()
@@ -90,11 +90,19 @@ class TestPoseMetrics(unittest.TestCase):
 
 
 class TestGates(unittest.TestCase):
-    def test_only_a_finished_apose_skips_the_reshape(self):
-        m = {"arm_angle_deg": fc_pose.APOSE_MIN_ARM_ANGLE, "wrist_gap_min": fc_pose.APOSE_MIN_WRIST_GAP}
+    def test_only_a_real_apose_skips_the_reshape(self):
+        m = {"arm_angle_deg": fc_pose.SOURCE_APOSE_MIN_ANGLE,
+             "wrist_gap_min": fc_pose.APOSE_MIN_WRIST_GAP}
         self.assertFalse(fc_pose.needs_arm_reshape(m))
-        self.assertTrue(fc_pose.needs_arm_reshape({**m, "arm_angle_deg": 17.9}))
+        self.assertTrue(fc_pose.needs_arm_reshape({**m, "arm_angle_deg": 29.9}))
         self.assertTrue(fc_pose.needs_arm_reshape({**m, "wrist_gap_min": 0.99}))
+
+    def test_borderline_source_is_reposed_even_though_it_would_be_accepted(self):
+        # 19.9 / 1.05 (Ol1nLLM smoke): prijimaci prah by ho vzal, ale jako
+        # zdroj se prepozuje - Wan vraci 44-50 stupnu, takze si polepsi
+        m = {"arm_angle_deg": 19.9, "wrist_gap_min": 1.05}
+        self.assertTrue(fc_pose.apose_accepted(m))
+        self.assertTrue(fc_pose.needs_arm_reshape(m))
 
     def test_arms_down_along_wide_hips_still_need_reshaping(self):
         # malby z Ol1nLLM 2026-09-16: paze na tele, ale zapesti daleko od osy
@@ -102,15 +110,16 @@ class TestGates(unittest.TestCase):
                   {"arm_angle_deg": 2.0, "wrist_gap_min": 1.32}):
             self.assertTrue(fc_pose.needs_arm_reshape(m))
 
-    def test_unmeasurable_arms_are_left_alone(self):
-        # bez pazi by vysledek nesel zkontrolovat, tak se ani neprepozovava
-        self.assertFalse(fc_pose.needs_arm_reshape({"shoulder_w": 100.0, "ankles_visible": True}))
-        self.assertFalse(fc_pose.needs_arm_reshape({"wrist_gap_min": 0.3}))
+    def test_unmeasurable_arms_need_reshaping_the_most(self):
+        # ruce za zady nebo uriznute ramem: Wan je domysli, vysledek se
+        # zkontroluje az na cele postave
+        self.assertTrue(fc_pose.needs_arm_reshape({"shoulder_w": 100.0, "ankles_visible": True}))
+        self.assertTrue(fc_pose.needs_arm_reshape({"wrist_gap_min": 0.3}))
 
     def test_error_metrics_never_trigger_either_gate(self):
         m = {"error": "chybi ramena nebo boky"}
         self.assertFalse(fc_pose.needs_arm_reshape(m))
-        self.assertFalse(fc_pose.needs_leg_outpaint(m))
+        self.assertFalse(fc_pose.needs_outpaint(m, 200, 500))
 
 
 class TestAposeAcceptance(unittest.TestCase):
@@ -153,17 +162,82 @@ class TestBarBounds(unittest.TestCase):
         self.assertEqual(fc_pose.bar_bounds([14.0] * 50 + [54.0] * 50, 100), (0, 0))
 
 
-class TestOutpaintBottom(unittest.TestCase):
-    def test_rounds_up_to_a_multiple_of_16(self):
+class TestOutpaintMargins(unittest.TestCase):
+    # sirka ramen 100 -> A-poza potrebuje 2.0*100 px na kazdou stranu osy
+    WIDE = {"hip_y": 500.0, "torso": 100.0, "shoulder_w": 100.0, "axis_x": 300.0,
+            "ankles_visible": True}
+
+    def test_bottom_rounds_up_to_a_multiple_of_16(self):
         # floor_y = hip_y(1000) + 2.2*torso(300) = 1660; vyska obrazku 1400
         # -> chybi presne 260 px, zaokrouhlit nahoru na 16 = 272
-        px = fc_pose.outpaint_bottom_px({"hip_y": 1000.0, "torso": 300.0}, 1400)
-        self.assertEqual(px, 272)
-        self.assertEqual(px % 16, 0)
+        m = {"hip_y": 1000.0, "torso": 300.0, "shoulder_w": 100.0, "axis_x": 300.0}
+        margins = fc_pose.outpaint_margins(m, 600, 1400)
+        self.assertEqual(margins["bottom"], 272)
+        self.assertEqual(margins["bottom"] % 16, 0)
+
+    def test_visible_ankles_need_no_bottom(self):
+        self.assertEqual(fc_pose.outpaint_margins(self.WIDE, 600, 900)["bottom"], 0)
 
     def test_floor_already_inside_the_image_needs_nothing(self):
-        px = fc_pose.outpaint_bottom_px({"hip_y": 500.0, "torso": 100.0}, 2000)
-        self.assertEqual(px, 0)
+        m = {**self.WIDE, "ankles_visible": False}
+        self.assertEqual(fc_pose.outpaint_margins(m, 600, 2000)["bottom"], 0)
+
+    def test_room_for_spread_arms_on_both_sides(self):
+        # osa uprostred 600 px obrazku: 300 px na stranu, potreba 200 -> nic
+        self.assertEqual(fc_pose.outpaint_margins(self.WIDE, 600, 900)["left"], 0)
+        self.assertEqual(fc_pose.outpaint_margins(self.WIDE, 600, 900)["right"], 0)
+        # uzky obrazek 300 px, osa uprostred: chybi 50 px na kazdou stranu
+        narrow = {**self.WIDE, "axis_x": 150.0}
+        margins = fc_pose.outpaint_margins(narrow, 300, 900)
+        self.assertEqual(margins["left"], 64)
+        self.assertEqual(margins["right"], 64)
+
+    def test_off_centre_figure_pads_asymmetrically(self):
+        # postava u leveho kraje: vlevo chybi hodne, vpravo nic
+        m = {**self.WIDE, "axis_x": 80.0}
+        margins = fc_pose.outpaint_margins(m, 600, 900)
+        self.assertEqual(margins["left"], 128)     # 200 - 80 = 120 -> 128
+        self.assertEqual(margins["right"], 0)
+
+    def test_top_is_never_outpainted(self):
+        # domyslet hlavu by znamenalo vymyslet tvar, a to uz je jiny clovek
+        for m in (self.WIDE, {**self.WIDE, "axis_x": 10.0}, {"error": "x"}):
+            self.assertEqual(fc_pose.outpaint_margins(m, 300, 900)["top"], 0)
+
+    def test_huge_padding_is_cut_to_the_pixel_budget(self):
+        # uzka fotka useknuta v pase: sama by si rekla o 4x vetsi plochu
+        m = {"hip_y": 900.0, "torso": 300.0, "shoulder_w": 250.0, "axis_x": 290.0,
+             "ankles_visible": False}
+        margins = fc_pose.outpaint_margins(m, 579, 1024)
+        w, h = fc_pose.padded_size(margins, 579, 1024)
+        self.assertLessEqual(w * h, fc_pose.OUTPAINT_MAX_PIXELS)
+        self.assertGreater(margins["bottom"], 0)      # nohy zustanou
+        self.assertEqual(margins["top"], 0)
+
+    def test_sides_are_sacrificed_before_the_legs(self):
+        margins = fc_pose.fit_to_budget({"left": 400, "right": 400, "top": 0, "bottom": 720},
+                                        579, 1024, budget=1_200_000)
+        self.assertLess(margins["left"], 400)        # strany osekane jen tolik, kolik treba
+        self.assertEqual(margins["bottom"], 720)     # nohy cele
+        w, h = fc_pose.padded_size(margins, 579, 1024)
+        self.assertLessEqual(w * h, 1_200_000)
+
+    def test_legs_shrink_only_when_dropping_the_sides_is_not_enough(self):
+        margins = fc_pose.fit_to_budget({"left": 400, "right": 400, "top": 0, "bottom": 2000},
+                                        579, 1024, budget=1_000_000)
+        self.assertEqual((margins["left"], margins["right"]), (0, 0))
+        self.assertLess(margins["bottom"], 2000)
+        w, h = fc_pose.padded_size(margins, 579, 1024)
+        self.assertLessEqual(w * h, 1_000_000)
+
+    def test_budget_that_fits_changes_nothing(self):
+        margins = fc_pose.fit_to_budget({"left": 16, "right": 16, "top": 0, "bottom": 32},
+                                        600, 900, budget=5_000_000)
+        self.assertEqual(margins, {"left": 16, "right": 16, "top": 0, "bottom": 32})
+
+    def test_error_metrics_pad_nothing(self):
+        self.assertEqual(fc_pose.outpaint_margins({"error": "x"}, 300, 900),
+                         {"left": 0, "right": 0, "top": 0, "bottom": 0})
 
 
 class TestParseKeypoints(unittest.TestCase):
@@ -184,6 +258,23 @@ class TestParseKeypoints(unittest.TestCase):
     def test_accepts_the_list_of_frames_wrapper_too(self):
         kps = fc_pose.parse_pose_keypoints([self._frame()], 200, 400)
         self.assertEqual(len(kps), 18)
+
+    def test_the_biggest_person_wins_not_the_first(self):
+        # po outpaintu do stran si FLUX obcas domysli kolemjdouci v pozadi
+        def person(scale, conf=0.9):
+            flat = []
+            for i in range(18):
+                flat += [10.0 * i * scale, 20.0 * i * scale, conf]
+            return {"pose_keypoints_2d": flat}
+        frame = {"people": [person(0.2), person(1.0), person(0.3)],
+                 "canvas_width": 200, "canvas_height": 400}
+        kps = fc_pose.parse_pose_keypoints(frame, 200, 400)
+        self.assertEqual(kps[17][0], 10.0 * 17)     # body velke postavy, ne prvni
+
+    def test_people_without_keypoints_are_ignored(self):
+        frame = {"people": [{"pose_keypoints_2d": []}, {"pose_keypoints_2d": [5.0, 6.0, 0.9] * 18}],
+                 "canvas_width": 200, "canvas_height": 400}
+        self.assertIsNotNone(fc_pose.parse_pose_keypoints(frame, 200, 400))
 
     def test_no_people_means_dwpose_found_nobody(self):
         self.assertIsNone(fc_pose.parse_pose_keypoints({"people": [], "canvas_width": 1, "canvas_height": 1}, 1, 1))
@@ -238,12 +329,18 @@ class TestGraphs(unittest.TestCase):
         self.assertEqual(g["3"]["class_type"], "SavePoseKpsAsJsonFile")
         self.assertEqual(g["3"]["inputs"]["filename_prefix"], "fc/pose")
 
-    def test_outpaint_graph_sets_bottom_and_prompt(self):
-        g = fc_pose.outpaint_graph("fc/img.png", 128, "grow legs", 7, "fc/out")
-        self.assertEqual(g["31"]["inputs"]["bottom"], 128)
-        self.assertEqual(g["31"]["inputs"]["left"], 0)
+    def test_outpaint_graph_sets_every_margin_and_prompt(self):
+        g = fc_pose.outpaint_graph("fc/img.png",
+                                   {"left": 64, "right": 32, "top": 0, "bottom": 128},
+                                   "grow legs", 7, "fc/out")
+        pad = g["31"]["inputs"]
+        self.assertEqual((pad["left"], pad["right"], pad["top"], pad["bottom"]), (64, 32, 0, 128))
         self.assertEqual(g["14"]["inputs"]["text"], "grow legs")
         self.assertEqual(g["18"]["inputs"]["seed"], 7)
+
+    def test_outpaint_graph_defaults_missing_margins_to_zero(self):
+        pad = fc_pose.outpaint_graph("i", {"bottom": 16}, "p", 1, "fc/out")["31"]["inputs"]
+        self.assertEqual((pad["left"], pad["right"], pad["top"]), (0, 0, 0))
 
     def test_kontext_graph_wires_prompt_and_seed(self):
         g = fc_pose.kontext_graph("fc/img.png", "A-pose", 11, "fc/apose")

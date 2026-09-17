@@ -810,3 +810,43 @@ zatím nevadí — hlídat, kdyby se u nějaké postavy trhaly končetiny.
 Otevřené: rozpočet 8000 trojúhelníků na celou postavu je pořád málo na to,
 aby prsty byly hladké — stojí za zvážení zvednout `user` cíl, Roblox a
 Luanti mají limity enginu.
+
+## 19. A-póza pro každý obrázek (nasazeno 2026-09-17)
+
+Po §17 se přepózovávalo všechno kromě „hotové A-pózy" s prahem 18°. Praxe
+ukázala tři díry a jednu, která stála za nejvíc:
+
+**1. Práh 18° byl na vstupu moc nízký.** Přepózování vrací 44–50°, takže
+zdroj s 20° si po něm polepší. Nový `SOURCE_APOSE_MIN_ANGLE = 30` (přijímací
+`APOSE_MIN_ARM_ANGLE = 18` zůstává — jiná otázka, jiný práh). Z 34 zdrojů se
+teď přepózuje 33; jediný přeskočený má 70° a mezeru 3,5.
+
+**2. Nezměřené paže se přeskakovaly.** Ruce za zády nebo uříznuté rámem
+přepózování potřebují nejvíc — Wan je domyslí podle řídicí pózy a výsledek
+se ověří až na celé postavě, kde je DWPose vidí. Přeskakuje se jen, když
+DWPose nenajde ani ramena a boky.
+
+**3. Outpaint uměl jen dolů.** Rozpažené ruce potřebují
+`APOSE_SPAN_SHOULDERS = 4` šířky ramen kolem osy těla; u reference oříznuté
+po stranách je Wan prostě ustřihne (varianta B v §15). `outpaint_margins`
+teď počítá i levý a pravý okraj. Nahoru se nedomýšlí nikdy — chybějící
+hlava znamená vymyšlenou tvář, a to už je jiný člověk.
+
+Strop `OUTPAINT_MAX_PIXELS = 2,5 MPx`: bez něj si nejhorší fotky říkaly
+o 2021×3396 px. Když se výsledek nevejde, ubírá se nejdřív po stranách
+(tam je jen pozadí) a teprve pak dole (nohy jsou podstatnější).
+
+**4. Rozlišení přepózování bylo úzké hrdlo celého meshe.** Z Wanu jde
+obrázek rovnou do TRELLISu, který zvládne až 2048 px — a my mu posílali
+480×832. Na stejné referenci (Wan 480p vs 720p → RMBG → TRELLIS):
+
+| | póza | mesh |
+|---|---|---|
+| 480×832 | 45,2° / 1,23 | prsty srostlé blánou, pásek rozmazaný |
+| **720×1280** | 46,1° / 1,26 | **prsty oddělené, pásek a kapsy ostré** |
+
+Cena 91 s místo 60 s. Výš to nejde, 14B Animate je trénovaný do 720p.
+
+Vedlejší nález: od outpaintu do stran si FLUX Fill občas domyslí
+kolemjdoucí v pozadí. `parse_pose_keypoints` proto bere **největší** postavu
+v obraze, ne první v poli, a prompt říká „nobody else in the picture".

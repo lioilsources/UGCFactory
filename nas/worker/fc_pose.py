@@ -43,6 +43,24 @@ CONF_MIN = 0.3
 APOSE_MIN_ARM_ANGLE = 18.0
 APOSE_MIN_WRIST_GAP = 1.0
 
+# Vstupni brana je prisnejsi nez prijimaci: prepozovani vraci 44-50 stupnu,
+# takze zdroj s 20 stupni (paze skoro svisle u tela) na tom bude po nem
+# lip - preskakovat ma smysl jen u opravdove A-pozy. Zmereno 2026-09-16:
+# ridici fotka 47 stupnu, dve postavy tesne nad drivejsim prahem 19.9 -
+# ty se dosud preskakovaly zbytecne.
+SOURCE_APOSE_MIN_ANGLE = 30.0
+
+# Kolik sirek ramen musi byt v obrazku vodorovne k dispozici, aby se do nej
+# A-poza vesla. Zmereno na ridici fotce: zapesti je 1.74 sirky ramen od osy
+# trupu, takze rozpeti mezi zapestimi je ~3.5 a s dlanemi a rezervou 4.
+APOSE_SPAN_SHOULDERS = 4.0
+
+# Strop na velikost obrazku po outpaintu. Bez nej si nektere fotky reknou
+# az o ctyrnasobek plochy (zmereno 2026-09-17: nejhorsi 2021x3396), coz je
+# na FLUX Fill na sdilenem GPU dlouhe - a cim vetsi kus se domysli, tim vic
+# je vymysleny. Produkcni bezy do 1.8 MPx dosud probihaly v pohode.
+OUTPAINT_MAX_PIXELS = 2_500_000
+
 # Kolik nasobku trupu sahaji nohy pod boky - z Mixamo kostry (stehno+holen)
 # / trup = 1.92, plus chodidlo a rezerva. Urcuje, o kolik pixelu dole se
 # vyplati outpaintovat, kdyz kotniky nejsou videt.
@@ -71,11 +89,13 @@ KONTEXT_APOSE_PROMPT = (
     "away from the body at about 35 degrees, palms open, feet planted "
     "shoulder-width apart. Whole body from head to feet visible."
 )
-OUTPAINT_LEGS_PROMPT = (
-    "Continue the same figure downward, seamlessly: the legs of the same "
-    "person in the same clothing and the same art style, standing straight "
-    "and facing the camera, feet shoulder-width apart, matching shoes, on a "
-    "plain flat floor, consistent lighting. Full body visible from head to feet."
+OUTPAINT_PROMPT = (
+    "Continue the same figure and its background seamlessly: the same person "
+    "in the same clothing and the same art style, standing straight and facing "
+    "the camera, both arms and both legs entirely inside the frame, feet "
+    "shoulder-width apart, matching shoes, on a plain flat floor, consistent "
+    "lighting. Full body visible from head to feet. Nobody else in the picture, "
+    "no other people or figures in the background."
 )
 # Pevny seed z experimentu 2026-09-15 (fc_pose_exp.py) - cislo samo nema
 # vyznam, ale pevny znamena, ze retry dava stejny vysledek.
@@ -84,7 +104,13 @@ POSE_FIX_SEED = 11
 # Wan Animate prepozovani (repose_graph): 480x832 je nativni 480p rozliseni
 # modelu na vysku; TRELLIS si vstup stejne zmensuje na 518 px, takze o
 # detail se neprichazi. 5 snimku = nejkratsi delka 4k+1, vsechny stejna poza.
-REPOSE_W, REPOSE_H = 480, 832
+# 720p, ne 480p: z prepozovani jde obrazek rovnou do TRELLISu, ktery umi
+# vstup az 2048 px (fc_mesh.json, Trellis2PreProcessImage max_size), takze
+# 480x832 byl skrt pres cely mesh, nejen pres dlane. Zmereno 2026-09-17 na
+# stejne referenci: poza stejna (46.1 stupne, mezera 1.26 proti 45.2/1.23),
+# ale mesh z 720p ma oddelene prsty a ostrejsi pasek i kapsy. Cena 91 s
+# misto 60 s. Vys uz model nejde - 14B Animate je trenovany do 720p.
+REPOSE_W, REPOSE_H = 720, 1280
 REPOSE_FRAMES = 5
 REPOSE_PROMPT = (
     "the same person standing still in an A-pose, arms held straight out away "
@@ -92,18 +118,33 @@ REPOSE_PROMPT = (
 )
 
 
+def _person_size(raw):
+    """Uhlopricka obalky duveryhodnych bodu - cim vetsi, tim blize je clovek
+    ke kamere."""
+    pts = [(raw[i], raw[i + 1]) for i in range(0, min(len(raw), 54), 3)
+           if raw[i + 2] > CONF_MIN]
+    if len(pts) < 2:
+        return 0.0
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+
+
 def parse_pose_keypoints(saved_json, width, height):
-    """Klouby prvniho cloveka z vystupu SavePoseKpsAsJsonFile, prepocitane
+    """Klouby hlavniho cloveka z vystupu SavePoseKpsAsJsonFile, prepocitane
     do pixelu skutecneho obrazku (DWPose canvas muze mit jine rozliseni
     nez original - resolution parametr ho skaluje).
+
+    Hlavni = nejvetsi v obraze, ne prvni v poli: od outpaintu do stran si
+    FLUX Fill obcas domysli kolemjdouci v pozadi (zmereno 2026-09-17) a na
+    tech by se merila poza misto na postave.
 
     Vraci [(x, y, confidence), ...] 18 bodu, nebo None kdyz DWPose nikoho
     nenasel (prazdny seznam "people")."""
     frame = saved_json[0] if isinstance(saved_json, list) else saved_json
-    people = frame.get("people") or []
+    people = [p for p in (frame.get("people") or []) if p.get("pose_keypoints_2d")]
     if not people:
         return None
-    raw = people[0]["pose_keypoints_2d"]
+    raw = max(people, key=lambda p: _person_size(p["pose_keypoints_2d"]))["pose_keypoints_2d"]
     cw = frame.get("canvas_width") or width
     ch = frame.get("canvas_height") or height
     return [(raw[i] * width / cw, raw[i + 1] * height / ch, raw[i + 2])
@@ -131,7 +172,10 @@ def pose_metrics(kps):
     if shoulder_w < 1.0:
         return {"error": "ramena na jednom bode"}
     torso = _dist(neck, hip)
-    m = {"shoulder_w": round(shoulder_w, 1), "torso": round(torso, 1), "hip_y": round(hip[1], 1)}
+    m = {"shoulder_w": round(shoulder_w, 1), "torso": round(torso, 1), "hip_y": round(hip[1], 1),
+         # svisla osa tela v pixelech - kolem ni se pocita, jestli se do
+         # obrazku vejdou rozpazene ruce (outpaint_margins)
+         "axis_x": round((neck[0] + hip[0]) / 2, 1)}
 
     def arm(sho, elb, wri):
         if not (ok(elb) and ok(wri)):
@@ -161,16 +205,23 @@ def pose_metrics(kps):
     return m
 
 
-def needs_leg_outpaint(metrics):
-    return "error" not in metrics and not metrics.get("ankles_visible")
+def needs_outpaint(metrics, image_width, image_height):
+    return any(outpaint_margins(metrics, image_width, image_height).values())
 
 
 def needs_arm_reshape(metrics):
-    """Prepozovat se nemusi jen uz hotova A-poza. Bez merenych pazi se
-    neprepozovava - vysledek by nesel zkontrolovat (apose_accepted)."""
-    if "error" in metrics or "wrist_gap_min" not in metrics or "arm_angle_deg" not in metrics:
+    """Prepozovava se vsechno krome hotove A-pozy (SOURCE_APOSE_MIN_ANGLE).
+
+    Nezmerene paze (ruce za zady, uriznute ramem) prepozovani POTREBUJI
+    nejvic - Wan je domysli podle ridici pozy a vysledek se pak zkontroluje
+    uz na cele postave, kde je DWPose vidi. Preskakuje se jen, kdyz DWPose
+    nenasel ani ramena a boky: tam neni z ceho vyjit ani co overit."""
+    if "error" in metrics:
         return False
-    return not apose_accepted(metrics)
+    if "arm_angle_deg" not in metrics or "wrist_gap_min" not in metrics:
+        return True
+    return not (metrics["arm_angle_deg"] >= SOURCE_APOSE_MIN_ANGLE
+                and metrics["wrist_gap_min"] >= APOSE_MIN_WRIST_GAP)
 
 
 def apose_accepted(metrics):
@@ -191,14 +242,60 @@ def apose_score(metrics):
     return metrics["wrist_gap_min"]
 
 
-def outpaint_bottom_px(metrics, image_height):
-    """Kolik pixelu dole domyslet, zaokrouhleno na 16 (FLUX Fill/
-    ImagePadForOutpaint pozaduje nasobky 16). 0 = odhadovana podlaha uz je
-    v obrazku (kotniky jen neduverihodne detekovane, ne chybejici) - neni
-    co delat."""
-    floor_y = metrics["hip_y"] + LEGS_BELOW_HIPS * metrics["torso"]
-    extra = max(floor_y - image_height, 0)
-    return int(math.ceil(extra / 16) * 16)
+def _to16(px):
+    """FLUX Fill / ImagePadForOutpaint chce nasobky 16."""
+    return int(math.ceil(max(px, 0) / 16) * 16)
+
+
+def outpaint_margins(metrics, image_width, image_height):
+    """Kolik pixelu kolem obrazku domyslet, aby se do nej vesla cela postava
+    v A-poze. {"left", "right", "top", "bottom"}, vse nasobky 16.
+
+    Dole: odhadnuta podlaha (hip_y + LEGS_BELOW_HIPS * torso) - jen kdyz
+    kotniky nejsou videt, jinak uz nohy v obrazku jsou.
+
+    Do stran: rozpazene ruce potrebuji APOSE_SPAN_SHOULDERS sirek ramen
+    kolem osy tela. Bez toho nema Wan Animate kam paze dat - u reference
+    orezane po stranach je jen ustrihne (zmereno 2026-09-16, varianta B).
+
+    Nahoru se nikdy nedomysli: chybejici hlava znamena vymyslenou tvar, a
+    to uz je jiny clovek (plan sekce 17)."""
+    out = {"left": 0, "right": 0, "top": 0, "bottom": 0}
+    if "error" in metrics:
+        return out
+    if not metrics.get("ankles_visible"):
+        floor_y = metrics["hip_y"] + LEGS_BELOW_HIPS * metrics["torso"]
+        out["bottom"] = _to16(floor_y - image_height)
+    half = APOSE_SPAN_SHOULDERS / 2 * metrics["shoulder_w"]
+    axis_x = metrics.get("axis_x", image_width / 2)
+    out["left"] = _to16(half - axis_x)
+    out["right"] = _to16(half - (image_width - axis_x))
+    return fit_to_budget(out, image_width, image_height)
+
+
+def padded_size(margins, width, height):
+    return (width + margins["left"] + margins["right"],
+            height + margins["top"] + margins["bottom"])
+
+
+def fit_to_budget(margins, width, height, budget=OUTPAINT_MAX_PIXELS):
+    """Osekne okraje, aby se vysledek vesel do `budget` pixelu. Ubira se
+    nejdriv po stranach (tam je jen pozadi), teprve pak dole - nohy jsou
+    podstatnejsi nez misto na rozpazeni."""
+    def over():
+        w, h = padded_size(margins, width, height)
+        return w * h > budget
+
+    for keys in (("left", "right"), ("bottom",)):
+        if not over():
+            break
+        full = {k: margins[k] for k in keys}
+        for step in range(9, -1, -1):        # 90 %, 80 % ... 0 %
+            for k in keys:
+                margins[k] = _to16(full[k] * step / 10)
+            if not over():
+                break
+    return margins
 
 
 def bar_bounds(row_std, height, std_max=BAR_STD_MAX, min_frac=BAR_MIN_FRAC):
@@ -269,16 +366,19 @@ def pose_graph(image, prefix, bbox_detector="yolox_l.onnx"):
     }
 
 
-def outpaint_graph(image, bottom_px, prompt, seed, prefix):
-    """FLUX Fill: domysli `bottom_px` pixelu dole, viditelna cast beze
-    zmeny (InpaintModelConditioning s noise_mask - stejny graf jako
-    Ol1nLLM assets/comfyui/flux_fill_inpaint.api.json, bez crop&stitch,
-    protoze se maluje az za okrajem puvodniho obrazku, ne uvnitr)."""
+def outpaint_graph(image, margins, prompt, seed, prefix):
+    """FLUX Fill: domysli okraje podle `margins` (viz outpaint_margins),
+    viditelna cast beze zmeny (InpaintModelConditioning s noise_mask -
+    stejny graf jako Ol1nLLM assets/comfyui/flux_fill_inpaint.api.json, bez
+    crop&stitch, protoze se maluje az za okrajem puvodniho obrazku, ne
+    uvnitr)."""
     return {
         "30": {"class_type": "LoadImage", "inputs": {"image": image, "upload": "image"}},
         "31": {"class_type": "ImagePadForOutpaint",
-              "inputs": {"image": ["30", 0], "left": 0, "top": 0, "right": 0,
-                        "bottom": bottom_px, "feathering": 40}},
+              "inputs": {"image": ["30", 0],
+                        "left": margins.get("left", 0), "top": margins.get("top", 0),
+                        "right": margins.get("right", 0), "bottom": margins.get("bottom", 0),
+                        "feathering": 40}},
         "10": {"class_type": "UNETLoader",
               "inputs": {"unet_name": "flux1-fill-dev-fp8.safetensors", "weight_dtype": "fp8_e4m3fn"}},
         "11": {"class_type": "DualCLIPLoader",
