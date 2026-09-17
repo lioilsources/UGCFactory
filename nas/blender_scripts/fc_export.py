@@ -124,6 +124,36 @@ def mute_animation(muted):
                 tr.mute = muted
 
 
+def strips_to_origin():
+    """Posune kazdy NLA strip na zacatek a vrati, jak to bylo.
+
+    fc_retarget.py sklada klipy ZA SEBE na jednu timeline, protoze Luanti umi
+    jen jednu a orientuje se v ni podle frame ranges. glTF exporter ale v
+    rezimu NLA_TRACKS bere cas ze stripu, takze kazda animace krome prvni
+    vysla s mrtvym nabehem od nuly az k sobe: zmereno 2026-09-17 na tancici
+    figurce - rumba 2.4 s tance po 33 s stani, snake 18.8 s po 65 s stani.
+    V prohlizeci to vypada, ze klip neloopuje a po prepnuti se "nic nedeje".
+
+    Kazdy klip ma vlastni track, takze je muzou zacinat vsechny v jednicce -
+    v NLA_TRACKS se kazdy track exportuje zvlast, nemichaji se. Pro FBX se
+    poradi zase vrati: tam je jedna dlouha timeline za sebou spravne (a
+    bake_anim_use_nla_strips by z prekryvu udelal kasi)."""
+    saved = []
+    for o in bpy.context.scene.objects:
+        if not o.animation_data:
+            continue
+        for tr in o.animation_data.nla_tracks:
+            for st in tr.strips:
+                saved.append((st, st.frame_start_ui))
+                st.frame_start_ui = 1.0
+    return saved
+
+
+def restore_strips(saved):
+    for st, start in reversed(saved):
+        st.frame_start_ui = start
+
+
 def looks_rendered(path, min_bytes):
     """Blender po nepovedenem renderu nechá prazdny kontejner a skonci s nulou -
     velikost souboru je jediny signal, ze v nem opravdu neco je."""
@@ -210,7 +240,10 @@ def main():
 
     glb = os.path.join(out_dir, "model.glb")
     fbx = os.path.join(out_dir, "model.fbx")
+    # GLB: kazdy klip od nuly (viz strips_to_origin), FBX: puvodni timeline
+    moved = strips_to_origin()
     export_glb(glb)
+    restore_strips(moved)
     export_fbx(fbx)
 
     mute_animation(True)
