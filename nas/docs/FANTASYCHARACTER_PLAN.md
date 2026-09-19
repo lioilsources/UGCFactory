@@ -850,3 +850,38 @@ Cena 91 s místo 60 s. Výš to nejde, 14B Animate je trénovaný do 720p.
 Vedlejší nález: od outpaintu do stran si FLUX Fill občas domyslí
 kolemjdoucí v pozadí. `parse_pose_keypoints` proto bere **největší** postavu
 v obraze, ne první v poli, a prompt říká „nobody else in the picture".
+
+## 20. Obličej místo nohou: Wan si domyslí druhou postavu (měřeno 2026-09-19)
+
+Postava `Ol1nLLM 3922d464` měla ve výsledku obličej tam, kde mají být nohy.
+Metriky přitom prošly (paže 48,1°, mezera 1,64, kotníky vidět) — kontrola
+z §15 tedy tuhle vadu nechytila.
+
+Řetěz příčin:
+
+1. Zdroj byl uříznutý v půlce stehen, takže si outpaint řekl o **896 px
+   dolů** (89 % výšky obrázku).
+2. FLUX Fill to nezvládl — spodní část vyšla jako **plochá béžová kaše
+   s duchy postav**, žádné nohy.
+3. Wan Animate dostal řídicí kostru přes celý rám (driver je celá postava),
+   ale v referenci dole nic použitelného — a do prázdna si domyslel **druhou
+   postavu**, typicky velký obličej.
+4. DWPose tu složeninu změřil jako jednoho člověka s přijatelnou pózou,
+   takže `apose_accepted` prošlo.
+
+Poměr outpaintu to nepředpoví: tři postavy s **větším** podílem (0,97 a 2×
+0,91) dopadly dobře, obě vadné byly na 0,89. Strop na poměr by tedy bral i
+funkční případy.
+
+**Nasazeno:** `fc_pose.people_count()` — DWPose vrací všechny nalezené lidi
+a při přepózování platí, že **víc než jeden = halucinace**. Naměřeno na 36
+postavách: 34 zdravých mělo přesně jednoho, dvě vadné dva (a byl to tentýž
+zdrojový obrázek nahraný dvakrát).
+
+- `apose_accepted` kandidáta s `people > 1` odmítne,
+- `apose_score` mu dá −2, takže neprojde ani jako nouzová varianta (obrázek
+  s druhou postavou je horší než původní fotka — TRELLIS by z něj udělal
+  obludu),
+- `reshape_arms` po takovém výsledku zkusí Wan **ještě jednou s jiným
+  seedem** (`WAN_RETRY_SEED`) — halucinace je věc seedu, ne vstupu, a druhý
+  pokus je levnější než spadnout na Kontext.

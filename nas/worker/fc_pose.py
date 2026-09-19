@@ -100,6 +100,9 @@ OUTPAINT_PROMPT = (
 # Pevny seed z experimentu 2026-09-15 (fc_pose_exp.py) - cislo samo nema
 # vyznam, ale pevny znamena, ze retry dava stejny vysledek.
 POSE_FIX_SEED = 11
+# Druhy pokus prepozovani, kdyz si Wan do prazdneho mista domysli dalsiho
+# cloveka (people_count > 1). Cislo samo nic neznamena, jen musi byt jine.
+WAN_RETRY_SEED = 23
 
 # Wan Animate prepozovani (repose_graph): 480x832 je nativni 480p rozliseni
 # modelu na vysku; TRELLIS si vstup stejne zmensuje na 518 px, takze o
@@ -127,6 +130,18 @@ def _person_size(raw):
         return 0.0
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+
+
+def people_count(saved_json):
+    """Kolik lidi DWPose v obrazku nasel.
+
+    Vic nez jeden znamena u prepozovani halucinaci: kdyz outpaint nedomysli
+    nohy (u silne orezanych fotek z nej obcas vyjde jen plocha kase), Wan ma
+    od ridici kostry informaci, ze tam telo patri, a domysli si do prazdna
+    druhou postavu - typicky velky oblicej misto nohou. Zmereno 2026-09-19:
+    34 zdravych postav melo po prepozovani presne jednu, dve vadne dve."""
+    frame = saved_json[0] if isinstance(saved_json, list) else saved_json
+    return len([p for p in (frame.get("people") or []) if p.get("pose_keypoints_2d")])
 
 
 def parse_pose_keypoints(saved_json, width, height):
@@ -227,8 +242,11 @@ def needs_arm_reshape(metrics):
 def apose_accepted(metrics):
     """Vystup prepozovani se bere jen kdyz jsou paze opravdu od tela - jinak
     by TRELLIS dostal stejne srostlou postavu jako predtim (jen jinak
-    nakreslenou) a cely krok by byl k nicemu."""
+    nakreslenou) a cely krok by byl k nicemu. A jen kdyz je v obrazku jeden
+    clovek: dva znamenaji, ze si model domyslel druhou postavu (people_count)."""
     if "error" in metrics or "arm_angle_deg" not in metrics:
+        return False
+    if metrics.get("people", 1) > 1:
         return False
     return (metrics["arm_angle_deg"] >= APOSE_MIN_ARM_ANGLE
             and metrics["wrist_gap_min"] >= APOSE_MIN_WRIST_GAP)
@@ -236,9 +254,13 @@ def apose_accepted(metrics):
 
 def apose_score(metrics):
     """Poradi kandidatu, kdyz zadny neprosel apose_accepted: vetsi mezera
-    zapesti = mene srustu (to je to, na cem TRELLIS ztroskota)."""
+    zapesti = mene srustu (to je to, na cem TRELLIS ztroskota). Obrazek s
+    domyslenou druhou postavou je vzdycky horsi nez zdroj - z nej by TRELLIS
+    udelal obludu (oblicej misto nohou), takze padá uplne dolu."""
     if "error" in metrics or "wrist_gap_min" not in metrics:
         return -1.0
+    if metrics.get("people", 1) > 1:
+        return -2.0
     return metrics["wrist_gap_min"]
 
 

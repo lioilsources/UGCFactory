@@ -401,7 +401,7 @@ def fix_pose(out_dir, image_path):
     image_path, trim = trim_bars(out_dir, image_path)
     if trim:
         stages.append(trim)
-    kps, w, h = detect_pose(out_dir, image_path)
+    kps, w, h, _ = detect_pose(out_dir, image_path)
     if kps is None:
         return {"metrics": {"error": "DWPose nikoho nenasel"}, "stages": stages, "current": image_path}
     metrics = fc_pose.pose_metrics(kps)
@@ -446,21 +446,30 @@ def reshape_arms(out_dir, image_path, source_metrics):
     candidates, files = [], {}
 
     def measure(name, path):
-        kps, _, _ = detect_pose(out_dir, path, f"pose_kps_{name}.json")
+        kps, _, _, people = detect_pose(out_dir, path, f"pose_kps_{name}.json")
         m = fc_pose.pose_metrics(kps) if kps is not None else {"error": "DWPose nikoho nenasel"}
+        if people > 1:
+            m["people"] = people      # domyslena druha postava, viz apose_accepted
         candidates.append((name, m))
         files[name] = path
         print(f"  preprocess: {name} -> {m}", flush=True)
 
-    try:
-        uploaded, driver = comfy_upload(image_path), comfy_upload(APOSE_DRIVER)
-        graph = fc_pose.repose_graph(uploaded, driver, fc_pose.POSE_FIX_SEED, "fc/repose")
-        outs = comfy_submit(graph, "A-pose (Wan Animate)")
-        last = max((o for o in outs if o[0].lower().endswith(".png")), key=lambda o: o[0])
-        measure("wan_repose", comfy_fetch(last, os.path.join(out_dir, "pose_repose.png")))
-    except Exception as e:
-        candidates.append(("wan_repose", {"error": str(e)[:300]}))
-        print(f"  preprocess: Wan Animate selhal ({candidates[-1][1]['error']})", flush=True)
+    def wan(seed, name, filename):
+        try:
+            uploaded, driver = comfy_upload(image_path), comfy_upload(APOSE_DRIVER)
+            graph = fc_pose.repose_graph(uploaded, driver, seed, "fc/repose")
+            outs = comfy_submit(graph, f"A-pose (Wan Animate, seed {seed})")
+            last = max((o for o in outs if o[0].lower().endswith(".png")), key=lambda o: o[0])
+            measure(name, comfy_fetch(last, os.path.join(out_dir, filename)))
+        except Exception as e:
+            candidates.append((name, {"error": str(e)[:300]}))
+            print(f"  preprocess: Wan Animate selhal ({candidates[-1][1]['error']})", flush=True)
+
+    wan(fc_pose.POSE_FIX_SEED, "wan_repose", "pose_repose.png")
+    # Domyslena druha postava je vec seedu, ne vstupu - druhy pokus ji
+    # obvykle nezopakuje a je levnejsi nez spadnout na Kontext.
+    if any(m.get("people", 1) > 1 for _, m in candidates):
+        wan(fc_pose.WAN_RETRY_SEED, "wan_repose_2", "pose_repose2.png")
 
     if not any(fc_pose.apose_accepted(m) for _, m in candidates):
         try:
@@ -482,8 +491,9 @@ def reshape_arms(out_dir, image_path, source_metrics):
 def detect_pose(out_dir, image_path, kps_name="pose_kps.json"):
     """DWPose na lokalnim souboru; bez bbox detektoru je pomalejsi, ale
     najde i postavy, ktere yolox mine (stejna zachrana jako tools/drive.py
-    ve video-stacku). Vraci (klouby, sirka, vyska) nebo (None, sirka, vyska),
-    kdyz DWPose nikoho nenasel ani na druhy pokus."""
+    ve video-stacku). Vraci (klouby, sirka, vyska, pocet lidi) nebo
+    (None, sirka, vyska, 0), kdyz DWPose nikoho nenasel ani na druhy pokus.
+    Pocet lidi rozhoduje o halucinaci pri prepozovani (fc_pose.people_count)."""
     w, h = fc_pose.image_size(image_path)
     for bbox in ("yolox_l.onnx", "None"):
         uploaded = comfy_upload(image_path)
@@ -491,10 +501,11 @@ def detect_pose(out_dir, image_path, kps_name="pose_kps.json"):
         outs = comfy_submit(graph, f"pose detect ({bbox})")
         path = comfy_fetch(pick_output(outs, ".json"), os.path.join(out_dir, kps_name))
         with open(path) as f:
-            kps = fc_pose.parse_pose_keypoints(json.load(f), w, h)
+            saved = json.load(f)
+        kps = fc_pose.parse_pose_keypoints(saved, w, h)
         if kps is not None:
-            return kps, w, h
-    return None, w, h
+            return kps, w, h, fc_pose.people_count(saved)
+    return None, w, h, 0
 
 
 def step_mesh(claim):

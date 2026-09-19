@@ -483,25 +483,46 @@ class TestReshapeArms(unittest.TestCase):
 
     def detect(self, out_dir, path, kps_name="pose_kps.json"):
         m = self.by_file[os.path.basename(path)]
-        return (fc_pose_kps(m), 100, 200)
+        return (fc_pose_kps(m), 100, 200, m.get("people", 1))
 
     def test_wan_accepted_skips_kontext(self):
         self.by_file["pose_repose.png"] = self.ACCEPTED
         out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
         self.assertEqual(os.path.basename(out), "pose_repose.png")
         self.assertEqual(stage["choice"], "wan_repose")
-        self.assertEqual(self.labels, ["A-pose (Wan Animate)"])
+        self.assertEqual(self.labels, ["A-pose (Wan Animate, seed 11)"])
         with open(out) as f:
             self.assertEqual(f.read(), "fc/repose_00003_.png")   # posledni snimek
 
     def test_wan_failure_falls_back_to_kontext(self):
-        self.failing.add("A-pose (Wan Animate)")
+        self.failing.add("A-pose (Wan Animate, seed 11)")
         self.by_file["pose_apose.png"] = self.WEAK
         out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
         self.assertEqual(os.path.basename(out), "pose_apose.png")   # lepsi nez zdroj, i kdyz neprijaty
         self.assertEqual(stage["choice"], "kontext_apose")
         self.assertIn("spadl", stage["candidates"][0]["error"])
-        self.assertEqual(self.labels, ["A-pose (Wan Animate)", "A-pose (Kontext)"])
+        self.assertEqual(self.labels, ["A-pose (Wan Animate, seed 11)", "A-pose (Kontext)"])
+
+    def test_hallucinated_second_person_is_retried_with_another_seed(self):
+        # Wan si do prazdneho mista domysli druhou postavu (oblicej misto
+        # nohou) - druhy pokus s jinym seedem to obvykle nezopakuje
+        self.by_file["pose_repose.png"] = {**self.ACCEPTED, "people": 2}
+        self.by_file["pose_repose2.png"] = self.ACCEPTED
+        out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
+        self.assertEqual(os.path.basename(out), "pose_repose2.png")
+        self.assertEqual(stage["choice"], "wan_repose_2")
+        self.assertEqual(self.labels,
+                         ["A-pose (Wan Animate, seed 11)", "A-pose (Wan Animate, seed 23)"])
+
+    def test_two_people_never_win_even_as_a_fallback(self):
+        # obrazek s druhou postavou je horsi nez zdroj - z nej by TRELLIS
+        # udelal obludu, takze se radsi nechá puvodni fotka
+        self.by_file["pose_repose.png"] = {"arm_angle_deg": 48.0, "wrist_gap_min": 1.6, "people": 2}
+        self.by_file["pose_repose2.png"] = {"arm_angle_deg": 47.0, "wrist_gap_min": 1.5, "people": 2}
+        self.by_file["pose_apose.png"] = {"error": "chybi ramena nebo boky"}
+        out, stage = fc_worker.reshape_arms(self.dir, "/x/src.png", self.SRC)
+        self.assertEqual(out, "/x/src.png")
+        self.assertIsNone(stage["choice"])
 
     def test_nothing_better_keeps_the_source(self):
         self.by_file["pose_repose.png"] = {"arm_angle_deg": 6.7, "wrist_gap_min": 0.58}
