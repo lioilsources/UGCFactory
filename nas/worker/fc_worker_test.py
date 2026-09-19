@@ -246,6 +246,64 @@ class TestComfyOutage(unittest.TestCase):
         with self.assertRaises(fc_worker.urllib.error.HTTPError):
             fc_worker.comfy_open("http://spark:8188/queue", 10)
 
+    def test_empty_body_during_restart_is_retried_not_swallowed(self):
+        """2026-09-19: ComfyUI behem restartu prijme spojeni a vrati 200
+        s prazdnym telem drive, nez je fakt pripravene - urlopen() tedy
+        uspeje a json.load() spadne mimo comfy_open. step_preprocess bral
+        tenhle pad jako nefatalni a tise pokracoval bez opravy pozy (legless
+        mesh bez chybove hlasky u postavy) - comfy_json to musi precekat."""
+        calls = {"n": 0}
+
+        class EmptyResp:
+            status = 200
+
+            def read(self_inner, *a):
+                return b""
+
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *exc):
+                return False
+
+        class OkResp:
+            status = 200
+
+            def read(self_inner, *a):
+                return b'{"ok": 1}'
+
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *exc):
+                return False
+
+        def opener(req, *a, **kw):
+            calls["n"] += 1
+            return EmptyResp() if calls["n"] == 1 else OkResp()
+
+        fc_worker.urllib.request.urlopen = opener
+        self.assertEqual(fc_worker.comfy_get("/history/x"), {"ok": 1})
+        self.assertGreaterEqual(calls["n"], 2)
+
+    def test_garbage_body_that_never_recovers_still_raises(self):
+        def opener(req, *a, **kw):
+            class Resp:
+                status = 200
+
+                def read(self_inner, *a):
+                    return b"not json"
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return False
+            return Resp()
+        fc_worker.urllib.request.urlopen = opener
+        with self.assertRaises(ValueError):
+            fc_worker.comfy_get("/history/x")
+
 
 class TestPrefixCandidates(unittest.TestCase):
     """Trellis2ExportMesh nezapise do history nic, takze se soubor musi

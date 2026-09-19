@@ -885,3 +885,35 @@ zdrojový obrázek nahraný dvakrát).
 - `reshape_arms` po takovém výsledku zkusí Wan **ještě jednou s jiným
   seedem** (`WAN_RETRY_SEED`) — halucinace je věc seedu, ne vstupu, a druhý
   pokus je levnější než spadnout na Kontext.
+
+## 21. Prázdné tělo od ComfyUI přežilo comfy_open (měřeno 2026-09-19)
+
+Přegenerování obou postav z §20 odhalilo další díru — tentokrát v §17
+odolnosti proti restartu ComfyUI, ne v A-póze.
+
+`Ol1nLLM 12e1917e` skončila jako legless torzo naškálované na 1,8 m, bez
+chyby ve stavu postavy. V logu: 5× `ComfyUI nedostupne ... zkousim za 20s`
+(Spark se restartoval), pak `preprocess: oprava pozy preskocena (Expecting
+value: line 1 column 1)`, `done` za 1816 s.
+
+Příčina: `comfy_open()` chytá jen selhání **spojení** (`URLError`, timeout).
+Během restartu ale ComfyUI umí spojení přijmout a vrátit `200` s prázdným
+tělem, dřív než je fakt připravené odpovídat — `urlopen()` tedy uspěje,
+`comfy_open` to bere jako úspěch, a spadne až `json.load(resp)` **mimo**
+funkci, kterou §17 chránil. Ta výjimka proletí přes `comfy_get`/`comfy_post`
+bez retry rovnou do `fix_pose`, kde ji `step_preprocess` bere jako
+nefatální selhání kroku opravy pózy a tiše pokračuje se **zdrojovou fotkou
+bez jakékoli úpravy** — u fotky uříznuté v půlce stehen tak vznikne mesh
+bez nohou, a postava skončí jako `done`.
+
+Rozsah škody: sken všech 36 postav z dávky ukázal jen tuhle jednu.
+
+**Nasazeno:** `comfy_json()` obaluje `comfy_open` + `json.load` společně a
+na `ValueError` (neplatné/prázdné tělo) čeká stejně jako na výpadek spojení
+- `comfy_wait_until_up()` a jeden další pokus. HTTP chyby (400/404) dál
+procházejí beze změny, to je odpověď serveru, ne vypadek. `comfy_post`,
+`comfy_get` a `comfy_upload` teď jdou přes `comfy_json`.
+
+Otevřené: `comfy_fetch()` (stahování binárních souborů - GLB, PNG) stejnou
+dírou trpět může taky, jen se projeví jako tichy zkrácený/prázdný soubor
+místo výjimky - není to potvrzeno, jen totéž riziko ve stejném okně.

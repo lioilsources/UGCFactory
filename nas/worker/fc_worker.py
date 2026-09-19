@@ -185,22 +185,41 @@ def comfy_open(req, timeout):
         return urllib.request.urlopen(req, timeout=timeout)
 
 
+def comfy_json(req, timeout):
+    """comfy_open + json.load, ktere taky prezije restart.
+
+    comfy_open sam restart restartu ComfyUI neodchyti cely: behem nej server
+    obcas prijme spojeni a vrati 200 s prazdnym telem drive, nez je fakt
+    pripraveny odpovidat - urlopen() tedy uspeje a spadne az json.load()
+    mimo comfy_open. Zmereno 2026-09-19: "Expecting value: line 1 column 1"
+    v tomhle miste proletelo bez retry az do step_preprocess, ktery pad
+    povazuje za nefatalni a tise pokracoval se zdrojovou fotkou bez jakekoli
+    opravy pozy - legless mesh, ale bez chybove hlasky u postavy."""
+    try:
+        with comfy_open(req, timeout) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError:
+        raise
+    except ValueError:
+        comfy_wait_until_up()
+        with comfy_open(req, timeout) as resp:
+            return json.load(resp)
+
+
 def comfy_post(path, payload):
     """ComfyUI vraci duvod odmitnuti (chybejici vstup, neznamy soubor, graf
     bez vystupu) v tele 400 - bez nej v chybe kroku zbyde jen "Bad Request"."""
     req = urllib.request.Request(COMFY + path, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
-        with comfy_open(req, 60) as resp:
-            return json.load(resp)
+        return comfy_json(req, 60)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:800]
         raise RuntimeError(f"ComfyUI {path} {e.code}: {body}") from None
 
 
 def comfy_get(path):
-    with comfy_open(COMFY + path, 60) as resp:
-        return json.load(resp)
+    return comfy_json(COMFY + path, 60)
 
 
 def comfy_upload(path):
@@ -230,8 +249,7 @@ def comfy_upload(path):
     req = urllib.request.Request(
         COMFY + "/upload/image", data=body,
         headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
-    with comfy_open(req, 300) as resp:
-        out = json.load(resp)
+    out = comfy_json(req, 300)
     sub = out.get("subfolder") or ""
     return "%s/%s" % (sub, out["name"]) if sub else out["name"]
 
