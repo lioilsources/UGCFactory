@@ -1,0 +1,59 @@
+name: Release macOS
+
+# Prvni verejny build UGC Factory. Store olin.now binarky nehostuje — odkazuje
+# primo na assety z GitHub Release, takze bez tohohle workflow stranka jen
+# hlasi "Buildy brzy k dispozici".
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:      # aby sel build vyzkouset i bez tagu
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build & Release macOS
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build macOS (release)
+        working-directory: app
+        run: flutter build macos --release
+
+      - name: Package as ZIP
+        working-directory: app
+        run: |
+          cd "./build/macos/Build/Products/Release"
+          # Jmeno bundlu bere Xcode z PRODUCT_NAME, ne z pubspecu. Natvrdo
+          # zapsany nazev uz jednou zpusobil, ze zip skoncil s "Nothing to do!"
+          # a release vysel bez macOS assetu — bereme, co se opravdu postavilo.
+          app="$(ls -d *.app 2>/dev/null | head -1)"
+          if [ -z "$app" ]; then
+            echo "::error::v $(pwd) neni zadny .app bundle"; ls -la; exit 1
+          fi
+          echo "Balim $app"
+          zip -r "$GITHUB_WORKSPACE/UGCFactory-${{ github.ref_name }}-macOS.zip" "$app"
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: UGCFactory-${{ github.ref_name }}-macOS.zip
+          name: UGC Factory ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
