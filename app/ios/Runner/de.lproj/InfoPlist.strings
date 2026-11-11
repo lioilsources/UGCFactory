@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Ein Foto der Figur aufnehmen, aus der ein 3D-Modell wird.";
+"NSLocalNetworkUsageDescription" = "UGC Studio spricht über das lokale Netzwerk mit der ugc-api auf dem NAS.";
+"NSPhotoLibraryUsageDescription" = "Ein Bild der Figur auswählen, aus der ein 3D-Modell wird.";

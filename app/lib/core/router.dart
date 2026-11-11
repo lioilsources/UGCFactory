@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/app_localizations.dart';
 import '../modules/composer/composer_screen.dart';
 import '../modules/fc/fc_create_screen.dart';
 import '../modules/fc/fc_detail_screen.dart';
@@ -69,26 +70,30 @@ class _Shell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       body: shell,
       bottomNavigationBar: NavigationBar(
         selectedIndex: shell.currentIndex,
         onDestinationSelected: shell.goBranch,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.auto_awesome),
             label: 'Composer',
           ),
           NavigationDestination(
-            icon: Icon(Icons.playlist_play),
-            label: 'Fronta',
+            icon: const Icon(Icons.playlist_play),
+            label: l.navQueue,
           ),
-          NavigationDestination(icon: Icon(Icons.swipe), label: 'Triage'),
+          const NavigationDestination(icon: Icon(Icons.swipe), label: 'Triage'),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: 'Postavy',
+            icon: const Icon(Icons.person_outline),
+            label: l.navCharacters,
           ),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Nastaveni'),
+          NavigationDestination(
+            icon: const Icon(Icons.settings),
+            label: l.navSettings,
+          ),
         ],
       ),
     );

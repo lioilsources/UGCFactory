@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Memotret karakter yang akan dijadikan model 3D.";
+"NSLocalNetworkUsageDescription" = "UGC Studio berkomunikasi dengan ugc-api di NAS lewat jaringan lokal.";
+"NSPhotoLibraryUsageDescription" = "Memilih gambar karakter yang akan dijadikan model 3D.";

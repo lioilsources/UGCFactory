@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Fénykép készítése a karakterről, amelyből 3D modell készül.";
+"NSLocalNetworkUsageDescription" = "Az UGC Studio a helyi hálózaton keresztül beszél a NAS-on futó ugc-api-val.";
+"NSPhotoLibraryUsageDescription" = "Kép kiválasztása a karakterről, amelyből 3D modell készül.";

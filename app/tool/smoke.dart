@@ -5,7 +5,11 @@ import 'dart:io';
 import 'package:ugc_studio/core/api.dart';
 
 Future<void> main(List<String> args) async {
-  final api = UgcApi(args.isNotEmpty ? args.first : 'http://192.168.88.88:8095');
+  if (args.isEmpty) {
+    stderr.writeln('usage: dart run tool/smoke.dart <baseUrl>');
+    exit(64);
+  }
+  final api = UgcApi(args.first);
   final jobs = await api.jobs();
   final items = await api.items();
   print('jobs: ${jobs.length}, items: ${items.length}');

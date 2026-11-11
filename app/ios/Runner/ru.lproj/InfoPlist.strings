@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Съёмка персонажа, из которого сделают 3D-модель.";
+"NSLocalNetworkUsageDescription" = "UGC Studio обращается к ugc-api на NAS по локальной сети.";
+"NSPhotoLibraryUsageDescription" = "Выбор изображения персонажа, из которого сделают 3D-модель.";

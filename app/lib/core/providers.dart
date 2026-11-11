@@ -10,10 +10,20 @@ import 'fc_api.dart';
 import 'fc_models.dart';
 import 'models.dart';
 
-/// Vychozi je tailnet adresa JODA: funguje doma i z mobilnich dat, protoze
-/// Tailscale bezi na NASu, Sparku, Macu i telefonu. Zadny Cloudflare tunnel
-/// k tomu neni potreba. LAN alternativa: http://192.168.88.88:8095
-const defaultBaseUrl = 'http://joda.tailde0de8.ts.net:8095';
+/// Tailnet adresa NASu (`http://<host>.<tailnet>.ts.net:8095`): funguje doma i
+/// z mobilnich dat, protoze Tailscale bezi na NASu, Sparku, Macu i telefonu.
+/// Skutecnou adresu predej pri buildu (--dart-define=UGC_TAILNET_URL=...) nebo
+/// ji zadej v Nastaveni; ve verejnem repu je jen zastupna.
+const tailnetUrl = String.fromEnvironment(
+  'UGC_TAILNET_URL',
+  defaultValue: 'http://ugc-api.example.ts.net:8095',
+);
+
+/// Vychozi adresa API: tunel s Cloudflare Access, nebo --dart-define=UGC_API_URL.
+const defaultBaseUrl = String.fromEnvironment(
+  'UGC_API_URL',
+  defaultValue: 'https://ugc.ol1n.com',
+);
 
 /// Web build servíruje samo ugc-api na /app/, takze API je na stejnem
 /// originu - prazdny base URL znamena relativni cesty a zadne CORS ani

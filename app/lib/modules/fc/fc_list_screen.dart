@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/fc_models.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Galerie postav. Stav je na kartach videt primo, protoze pipeline ma sest
 /// kroku a "generuje se" by u tri minut cekani nestacilo.
@@ -12,13 +13,14 @@ class FcListScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final characters = ref.watch(fcCharactersProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Postavy')),
+      appBar: AppBar(title: Text(l.navCharacters)),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.go('/fc/new'),
         icon: const Icon(Icons.add_a_photo),
-        label: const Text('Nova'),
+        label: Text(l.newShort),
       ),
       body: characters.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -109,6 +111,7 @@ class FcStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     if (character.isFailed) {
       return Row(
         children: [
@@ -116,7 +119,7 @@ class FcStatusBadge extends StatelessWidget {
           const SizedBox(width: 4),
           Expanded(
             child: Text(
-              character.error.isEmpty ? 'selhalo' : character.error,
+              character.error.isEmpty ? l.sgFailed : character.error,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, color: Colors.redAccent),
@@ -126,13 +129,17 @@ class FcStatusBadge extends StatelessWidget {
       );
     }
     if (character.isDone) {
-      return const Row(
+      return Row(
         children: [
-          Icon(Icons.check_circle_outline, size: 14, color: Colors.greenAccent),
-          SizedBox(width: 4),
+          const Icon(
+            Icons.check_circle_outline,
+            size: 14,
+            color: Colors.greenAccent,
+          ),
+          const SizedBox(width: 4),
           Text(
-            'hotovo',
-            style: TextStyle(fontSize: 11, color: Colors.greenAccent),
+            l.sgDone,
+            style: const TextStyle(fontSize: 11, color: Colors.greenAccent),
           ),
         ],
       );
@@ -152,11 +159,11 @@ class _Empty extends StatelessWidget {
   const _Empty();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
     child: Padding(
-      padding: EdgeInsets.all(32),
+      padding: const EdgeInsets.all(32),
       child: Text(
-        'Zatim zadna postava.\nZacni fotkou nebo obrazkem humanoidni postavy.',
+        AppLocalizations.of(context).charactersEmpty,
         textAlign: TextAlign.center,
       ),
     ),
@@ -177,7 +184,10 @@ class _Error extends StatelessWidget {
         children: [
           Text(message, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Zkusit znovu')),
+          FilledButton(
+            onPressed: onRetry,
+            child: Text(AppLocalizations.of(context).retry),
+          ),
         ],
       ),
     ),

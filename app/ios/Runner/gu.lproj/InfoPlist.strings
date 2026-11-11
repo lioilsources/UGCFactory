@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "જે પાત્રનું 3D મૉડેલ બનશે તેનો ફોટો પાડવા માટે.";
+"NSLocalNetworkUsageDescription" = "UGC Studio સ્થાનિક નેટવર્ક પર NAS પરના ugc-api સાથે વાત કરે છે.";
+"NSPhotoLibraryUsageDescription" = "જે પાત્રનું 3D મૉડેલ બનશે તેની છબી પસંદ કરવા માટે.";

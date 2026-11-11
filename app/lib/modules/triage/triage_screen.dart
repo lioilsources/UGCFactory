@@ -4,6 +4,7 @@ import '../../shared/model_view.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Srdce appky: swipe triage nad joby ve stavu `new`.
 /// Doprava = approve (do Blender konverze), doleva = reject,
@@ -83,7 +84,9 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
   void _snack(BuildContext context, String msg) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 1)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 1)),
+      );
   }
 
   Future<void> _act(
@@ -97,7 +100,9 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
       await action();
       if (context.mounted) _snack(context, label);
     } catch (e) {
-      if (context.mounted) _snack(context, 'Chyba: $e');
+      if (context.mounted) {
+        _snack(context, AppLocalizations.of(context).errorPrefix('$e'));
+      }
     } finally {
       ref.read(jobsProvider.notifier).refresh();
     }
@@ -108,12 +113,15 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
   void _advance(WidgetRef ref) {
     final queue = ref.read(triageQueueProvider);
     final idx = queue.indexWhere((j) => j.id == job.id);
-    final next = (idx >= 0 && idx + 1 < queue.length) ? queue[idx + 1].id : null;
+    final next = (idx >= 0 && idx + 1 < queue.length)
+        ? queue[idx + 1].id
+        : null;
     ref.read(currentTriageIdProvider.notifier).state = next;
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final api = ref.watch(apiProvider);
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -143,12 +151,16 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
                           ),
                   ),
                   ListTile(
-                    title: Text(job.prompt,
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    title: Text(
+                      job.prompt,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     subtitle: Text(
-                        '${job.category} - ${job.style} - ${job.collection}'),
+                      '${job.category} - ${job.style} - ${job.collection}',
+                    ),
                     trailing: IconButton.filledTonal(
-                      tooltip: _show3d ? 'Zpet na koncept' : 'Ukaz 3D model',
+                      tooltip: _show3d ? l.backToConcept : l.show3d,
                       icon: Icon(_show3d ? Icons.image : Icons.view_in_ar),
                       onPressed: () => setState(() => _show3d = !_show3d),
                     ),
@@ -166,17 +178,28 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
               _RoundButton(
                 icon: Icons.close,
                 color: Colors.red,
-                onTap: () => _act(context, ref, () => api.reject(job.id), 'Zamitnuto'),
+                onTap: () => _act(
+                  context,
+                  ref,
+                  () => api.reject(job.id),
+                  l.rejectedToast,
+                ),
               ),
               _RoundButton(
                 icon: Icons.casino,
                 color: Colors.amber,
-                onTap: () => _act(context, ref, () => api.reroll(job.id), 'Reroll poslan na Spark'),
+                onTap: () =>
+                    _act(context, ref, () => api.reroll(job.id), l.rerollToast),
               ),
               _RoundButton(
                 icon: Icons.check,
                 color: Colors.green,
-                onTap: () => _act(context, ref, () => api.approve(job.id), 'Schvaleno -> konverze'),
+                onTap: () => _act(
+                  context,
+                  ref,
+                  () => api.approve(job.id),
+                  l.approvedToast,
+                ),
               ),
             ],
           ),
@@ -187,7 +210,11 @@ class _TriageCardState extends ConsumerState<_TriageCard> {
 }
 
 class _RoundButton extends StatelessWidget {
-  const _RoundButton({required this.icon, required this.color, required this.onTap});
+  const _RoundButton({
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
@@ -208,13 +235,13 @@ class _EmptyView extends StatelessWidget {
   const _EmptyView();
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.done_all, size: 72),
-          SizedBox(height: 12),
-          Text('Vse roztrizeno. Poslat novy batch v Composeru?'),
+          const Icon(Icons.done_all, size: 72),
+          const SizedBox(height: 12),
+          Text(AppLocalizations.of(context).allSorted),
         ],
       ),
     );
@@ -229,7 +256,10 @@ class _ErrorView extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text('NAS nedostupny:\n$error', textAlign: TextAlign.center),
+        child: Text(
+          AppLocalizations.of(context).nasUnavailable(error),
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }

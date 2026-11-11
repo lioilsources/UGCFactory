@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "3D モデルにするキャラクターを撮影するために使用します。";
+"NSLocalNetworkUsageDescription" = "UGC Studio はローカルネットワーク経由で NAS 上の ugc-api と通信します。";
+"NSPhotoLibraryUsageDescription" = "3D モデルにするキャラクターの画像を選ぶために使用します。";

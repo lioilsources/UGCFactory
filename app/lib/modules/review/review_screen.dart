@@ -4,6 +4,7 @@ import '../../shared/model_view.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// 3D Review: otoc si model, pod nim cisla z konverze a rozhodnuti.
 class ReviewScreen extends ConsumerWidget {
@@ -12,6 +13,7 @@ class ReviewScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final api = ref.watch(apiProvider);
     final report = job.report ?? const <String, dynamic>{};
     final tris = report['tri_count'];
@@ -67,43 +69,50 @@ class ReviewScreen extends ConsumerWidget {
                   children: [
                     if (tris != null)
                       _Stat(
-                        label: 'trojuhelniky',
+                        label: l.reviewTris,
                         value: '$tris${maxTris != null ? " / $maxTris" : ""}',
-                        ok: maxTris == null || (tris as int) <= (maxTris as int),
+                        ok:
+                            maxTris == null ||
+                            (tris as int) <= (maxTris as int),
                       ),
                     if (report['uv_ok'] != null)
                       _Stat(
                         label: 'UV',
-                        value: report['uv_ok'] == true ? 'ano' : 'ne',
+                        value: report['uv_ok'] == true ? l.yes : l.no,
                         ok: report['uv_ok'] == true,
                       ),
                     if (report['watertight'] != null)
                       _Stat(
                         label: 'watertight',
-                        value: report['watertight'] == true ? 'ano' : 'ne',
+                        value: report['watertight'] == true ? l.yes : l.no,
                         ok: report['watertight'] == true,
                       ),
                     if (report['texture_size'] != null)
                       _Stat(
-                        label: 'textura',
+                        label: l.reviewTexture,
                         value: '${report['texture_size']} px',
                         ok: true,
                       ),
                     if ((report['symmetry'] as String? ?? '').isNotEmpty)
                       _Stat(
-                        label: 'symetrie',
-                        value: '${report['symmetry']}'
-                            ' (sev ${report['symmetry_seam_verts'] ?? 0})',
+                        label: l.reviewSymmetry,
+                        value: l.seamVerts(
+                          '${report['symmetry']}',
+                          (report['symmetry_seam_verts'] as num?)?.toInt() ?? 0,
+                        ),
                         ok: true,
                       ),
                   ],
                 ),
                 for (final r
-                    in (report['verdict_reasons'] as List<dynamic>? ?? const []))
+                    in (report['verdict_reasons'] as List<dynamic>? ??
+                        const []))
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text('• $r',
-                        style: TextStyle(color: verdictColor, fontSize: 12)),
+                    child: Text(
+                      '• $r',
+                      style: TextStyle(color: verdictColor, fontSize: 12),
+                    ),
                   ),
               ],
             ),
@@ -116,7 +125,7 @@ class ReviewScreen extends ConsumerWidget {
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.replay),
-                      label: const Text('Konvertovat znovu'),
+                      label: Text(l.reconvertAgain),
                       onPressed: () async {
                         await api.reconvert(job.id);
                         ref.read(jobsProvider.notifier).refresh();
@@ -128,24 +137,21 @@ class ReviewScreen extends ConsumerWidget {
                   // rekonverzi - novy beh Sparku kvuli tomu neni potreba.
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.donut_large),
-                    tooltip: 'Znovu se symetrii',
+                    tooltip: l.reconvertSymmetry,
                     onSelected: (sym) async {
                       await api.reconvert(job.id, symmetry: sym);
                       ref.read(jobsProvider.notifier).refresh();
                       if (context.mounted) Navigator.pop(context);
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'radial',
-                        child: Text('Zdobeni dokola (radialni)'),
-                      ),
-                      PopupMenuItem(value: 'none', child: Text('Bez symetrie')),
+                    itemBuilder: (_) => [
+                      PopupMenuItem(value: 'radial', child: Text(l.radialMenu)),
+                      PopupMenuItem(value: 'none', child: Text(l.noSymmetry)),
                     ],
                   ),
                   Expanded(
                     child: FilledButton.icon(
                       icon: const Icon(Icons.inventory_2),
-                      label: const Text('Zabalit'),
+                      label: Text(l.pack),
                       onPressed: job.status != 'converted'
                           ? null
                           : () async {

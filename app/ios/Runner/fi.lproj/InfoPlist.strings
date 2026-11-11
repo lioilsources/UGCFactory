@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Ota valokuva hahmosta, josta tehdään 3D-malli.";
+"NSLocalNetworkUsageDescription" = "UGC Studio keskustelee NAS:n ugc-apin kanssa paikallisverkossa.";
+"NSPhotoLibraryUsageDescription" = "Valitse kuva hahmosta, josta tehdään 3D-malli.";

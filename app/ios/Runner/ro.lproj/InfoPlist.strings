@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Fotografierea personajului din care se face modelul 3D.";
+"NSLocalNetworkUsageDescription" = "UGC Studio comunică cu ugc-api de pe NAS prin rețeaua locală.";
+"NSPhotoLibraryUsageDescription" = "Alegerea unei imagini a personajului din care se face modelul 3D.";

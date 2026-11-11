@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "ถ่ายรูปตัวละครที่จะทำเป็นโมเดล 3D";
+"NSLocalNetworkUsageDescription" = "UGC Studio คุยกับ ugc-api บน NAS ผ่านเครือข่ายในพื้นที่";
+"NSPhotoLibraryUsageDescription" = "เลือกรูปตัวละครที่จะทำเป็นโมเดล 3D";

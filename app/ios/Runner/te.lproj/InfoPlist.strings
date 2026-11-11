@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "3D మోడల్‌గా మారే పాత్ర ఫోటో తీయడానికి.";
+"NSLocalNetworkUsageDescription" = "UGC Studio స్థానిక నెట్‌వర్క్ ద్వారా NAS లోని ugc-api తో మాట్లాడుతుంది.";
+"NSPhotoLibraryUsageDescription" = "3D మోడల్‌గా మారే పాత్ర చిత్రాన్ని ఎంచుకోవడానికి.";

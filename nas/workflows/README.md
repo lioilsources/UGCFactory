@@ -25,5 +25,5 @@ Výstup si worker vezme z `/history/{prompt_id}` a stáhne přes `/view`; bere
 první soubor s očekávanou příponou (`.png` u preprocess, `.glb` u mesh, `.fbx`
 u rig). Ať tedy graf neukládá mezivýsledky se stejnou příponou dřív než finál.
 
-Nastav `FC_COMFY_URL` (např. `http://192.168.88.66:8188`), jinak ComfyUI kroky
+Nastav `FC_COMFY_URL` (např. `http://<spark-host>:8188`), jinak ComfyUI kroky
 selžou hned s hláškou místo timeoutu.

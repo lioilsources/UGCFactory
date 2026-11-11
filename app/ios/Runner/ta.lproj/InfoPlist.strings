@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "3D மாதிரியாக மாற்றப்படும் கதாபாத்திரத்தைப் படம் எடுக்க.";
+"NSLocalNetworkUsageDescription" = "UGC Studio உள்ளூர் நெட்வொர்க் வழியாக NAS-இல் உள்ள ugc-api உடன் தொடர்பு கொள்கிறது.";
+"NSPhotoLibraryUsageDescription" = "3D மாதிரியாக மாற்றப்படும் கதாபாத்திரத்தின் படத்தைத் தேர்ந்தெடுக்க.";
