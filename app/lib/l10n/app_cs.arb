@@ -1,0 +1,203 @@
+{
+  "@@locale": "cs",
+  "navQueue": "Fronta",
+  "navCharacters": "Postavy",
+  "navSettings": "Nastavení",
+  "retry": "Zkusit znovu",
+  "nasUnavailable": "NAS nedostupný: {error}",
+  "@nasUnavailable": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "promptLabel": "Prompt itemu",
+  "categoriesLabel": "Kategorie",
+  "catHelmet": "Helma",
+  "catBack": "Křídla / záda",
+  "catSword": "Meč",
+  "catFront": "Hrudní plát",
+  "catHat": "Čepice",
+  "catHair": "Vlasy (riziko)",
+  "styleLabel": "Styl",
+  "collectionLabel": "Kolekce",
+  "radialTitle": "Zdobení dokola",
+  "radialSubtitle": "radiální symetrie – dorty, korunky",
+  "variantsPerCategory": "Varianty na kategorii: {count}",
+  "@variantsPerCategory": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "generateItems": "{count, plural, one{Vygenerovat {count} item} few{Vygenerovat {count} itemy} many{Vygenerovat {count} itemu} other{Vygenerovat {count} itemů}} (~{minutes} min)",
+  "@generateItems": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "composerSent": "Odesláno úloh: {sent} – Spark generuje (~4 min/kus, sériově)",
+  "@composerSent": {
+    "placeholders": {
+      "sent": {
+        "type": "int"
+      }
+    }
+  },
+  "composerSentErrors": "Odesláno: {sent}, chyby: {errors}",
+  "@composerSentErrors": {
+    "placeholders": {
+      "sent": {
+        "type": "int"
+      },
+      "errors": {
+        "type": "String"
+      }
+    }
+  },
+  "queueEmpty": "Na NASu zatím nic – pošli batch v Composeru.",
+  "stNew": "Čeká na triage",
+  "stRemeshing": "Přepočítává se v TRELLIS (~4 min)",
+  "stApproved": "Ve frontě na konverzi",
+  "stConverting": "Konvertuje se",
+  "stConverted": "Zkonvertováno – čeká na 3D review",
+  "stPacked": "Zabaleno pro Studio",
+  "stFailed": "Selhalo",
+  "stRejected": "Zamítnuto",
+  "stRerolled": "Rerollnuto",
+  "tapFor3d": "klepni pro 3D",
+  "pack": "Zabalit",
+  "sparkSection": "Vyrábí se na Sparku ({count})",
+  "@sparkSection": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sgQueued": "čeká ve frontě",
+  "sgConcept": "kreslí koncept",
+  "sgCleanplate": "odmazává pozadí",
+  "sgMesh": "modeluje 3D (~4 min)",
+  "sgPush": "posílá na NAS",
+  "sgDone": "hotovo",
+  "sgFailed": "selhalo",
+  "reviewTris": "trojúhelníky",
+  "reviewTexture": "textura",
+  "reviewSymmetry": "symetrie",
+  "yes": "ano",
+  "no": "ne",
+  "seamVerts": "{symmetry} (švů: {count})",
+  "@seamVerts": {
+    "placeholders": {
+      "symmetry": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "reconvertAgain": "Konvertovat znovu",
+  "reconvertSymmetry": "Znovu se symetrií",
+  "radialMenu": "Zdobení dokola (radiální)",
+  "noSymmetry": "Bez symetrie",
+  "backToConcept": "Zpět na koncept",
+  "show3d": "Ukaž 3D model",
+  "rejectedToast": "Zamítnuto",
+  "rerollToast": "Reroll poslán na Spark",
+  "approvedToast": "Schváleno → konverze",
+  "errorPrefix": "Chyba: {error}",
+  "@errorPrefix": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "allSorted": "Vše roztříděno. Poslat nový batch v Composeru?",
+  "newShort": "Nová",
+  "charactersEmpty": "Zatím žádná postava.\nZačni fotkou nebo obrázkem humanoidní postavy.",
+  "newCharacter": "Nová postava",
+  "creating": "Zakládám…",
+  "generate": "Vygenerovat",
+  "nameLabel": "Jméno",
+  "prepPhoto": "Připravit fotku",
+  "prepPhotoHelp": "Odstraní pozadí; když jsou ruce přilepené k tělu, odtáhne je do A-pózy, a když chybí nohy pod kotníky, domyslí je. Bez toho rig u srostlých končetin často selže.",
+  "animationsLabel": "Animace",
+  "libraryLoadFailed": "Knihovnu se nepodařilo načíst: {error}",
+  "@libraryLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "libraryEmpty": "Knihovna je prázdná. Klipy se registrují skriptem seed_animlib.py na NASu.",
+  "gallery": "Galerie",
+  "camera": "Fotoaparát",
+  "characterFallback": "Postava",
+  "downloadGlb": "Stáhnout GLB",
+  "downloadFbx": "Stáhnout FBX",
+  "downloadZip": "Stáhnout vše (ZIP)",
+  "sendRoblox": "Poslat do Robloxu",
+  "sendLuanti": "Poslat do Luanti",
+  "exportQueued": "Export do {target} zařazen",
+  "@exportQueued": {
+    "placeholders": {
+      "target": {
+        "type": "String"
+      }
+    }
+  },
+  "clipsTitle": "Klipy",
+  "exportsTitle": "Exporty",
+  "stepAttempt": "{step} (pokus {attempt})",
+  "@stepAttempt": {
+    "placeholders": {
+      "step": {
+        "type": "String"
+      },
+      "attempt": {
+        "type": "int"
+      }
+    }
+  },
+  "retryStep": "Zkusit krok znovu",
+  "stepOf": "krok {step} z {total}",
+  "@stepOf": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "cfAccessHelp": "Potřeba jen pro ugc.ol1n.com (přístup bez Tailscale).",
+  "saveAndTest": "Uložit a otestovat",
+  "connOk": "Spojení OK (načteno úloh: {count})",
+  "@connOk": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "connFailed": "Nedostupné: {error}",
+  "@connFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  }
+}
