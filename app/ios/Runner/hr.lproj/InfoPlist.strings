@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Fotografiranje lika od kojeg će se napraviti 3D model.";
+"NSLocalNetworkUsageDescription" = "UGC Studio razgovara s ugc-api na NAS-u preko lokalne mreže.";
+"NSPhotoLibraryUsageDescription" = "Odabir slike lika od kojeg će se napraviti 3D model.";

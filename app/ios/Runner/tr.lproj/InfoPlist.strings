@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "3D modele dönüştürülecek karakterin fotoğrafını çekmek için.";
+"NSLocalNetworkUsageDescription" = "UGC Studio, yerel ağ üzerinden NAS'taki ugc-api ile konuşur.";
+"NSPhotoLibraryUsageDescription" = "3D modele dönüştürülecek karakterin görselini seçmek için.";

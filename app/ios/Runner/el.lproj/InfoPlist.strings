@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Λήψη φωτογραφίας του χαρακτήρα από τον οποίο θα γίνει 3D μοντέλο.";
+"NSLocalNetworkUsageDescription" = "Το UGC Studio επικοινωνεί με το ugc-api στο NAS μέσω του τοπικού δικτύου.";
+"NSPhotoLibraryUsageDescription" = "Επιλογή εικόνας του χαρακτήρα από τον οποίο θα γίνει 3D μοντέλο.";

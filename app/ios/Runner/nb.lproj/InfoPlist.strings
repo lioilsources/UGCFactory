@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Ta et bilde av figuren som skal bli en 3D-modell.";
+"NSLocalNetworkUsageDescription" = "UGC Studio snakker med ugc-api på NAS-en over det lokale nettverket.";
+"NSPhotoLibraryUsageDescription" = "Velge et bilde av figuren som skal bli en 3D-modell.";

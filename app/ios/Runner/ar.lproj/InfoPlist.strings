@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "التقاط صورة للشخصية التي سيُصنع منها نموذج ثلاثي الأبعاد.";
+"NSLocalNetworkUsageDescription" = "يتصل UGC Studio بـ ugc-api على NAS عبر الشبكة المحلية.";
+"NSPhotoLibraryUsageDescription" = "اختيار صورة الشخصية التي سيُصنع منها نموذج ثلاثي الأبعاد.";

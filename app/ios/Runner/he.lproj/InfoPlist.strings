@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "צילום תמונה של הדמות שממנה ייווצר מודל תלת-ממד.";
+"NSLocalNetworkUsageDescription" = "UGC Studio מתקשר עם ugc-api ב-NAS דרך הרשת המקומית.";
+"NSPhotoLibraryUsageDescription" = "בחירת תמונה של הדמות שממנה ייווצר מודל תלת-ממד.";

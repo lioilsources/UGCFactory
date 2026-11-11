@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Chụp ảnh nhân vật sẽ được làm thành mô hình 3D.";
+"NSLocalNetworkUsageDescription" = "UGC Studio giao tiếp với ugc-api trên NAS qua mạng cục bộ.";
+"NSPhotoLibraryUsageDescription" = "Chọn ảnh của nhân vật sẽ được làm thành mô hình 3D.";
