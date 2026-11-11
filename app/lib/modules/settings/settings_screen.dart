@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Nastaveni pripojeni: kam appka mluvi a cim se prokazuje.
 ///
@@ -18,6 +19,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _idCtrl;
   late final TextEditingController _secretCtrl;
   String? _status;
+  bool _statusOk = false;
   bool _testing = false;
 
   static const _tailnet = tailnetUrl;
@@ -40,6 +42,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _save({bool test = true}) async {
+    final l = AppLocalizations.of(context);
     final prefs = ref.read(prefsProvider);
     final url = _urlCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
     await prefs.setString('baseUrl', url);
@@ -56,10 +59,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     try {
       final jobs = await ref.read(apiProvider).jobs(limit: 1);
-      setState(() => _status = 'Spojeni OK (${jobs.length} job nacten)');
+      setState(() {
+        _statusOk = true;
+        _status = l.connOk(jobs.length);
+      });
       ref.read(jobsProvider.notifier).refresh();
     } catch (e) {
-      setState(() => _status = 'Nedostupne: $e');
+      setState(() {
+        _statusOk = false;
+        _status = l.connFailed('$e');
+      });
     } finally {
       setState(() => _testing = false);
     }
@@ -67,18 +76,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ok = _status?.startsWith('Spojeni OK') ?? false;
+    final l = AppLocalizations.of(context);
+    final ok = _statusOk;
     return Scaffold(
-      appBar: AppBar(title: const Text('Nastaveni')),
+      appBar: AppBar(title: Text(l.navSettings)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           SegmentedButton<String>(
             segments: const [
-              ButtonSegment(value: _tailnet, label: Text('Tailscale'), icon: Icon(Icons.vpn_lock)),
-              ButtonSegment(value: _tunnel, label: Text('Internet'), icon: Icon(Icons.public)),
+              ButtonSegment(
+                value: _tailnet,
+                label: Text('Tailscale'),
+                icon: Icon(Icons.vpn_lock),
+              ),
+              ButtonSegment(
+                value: _tunnel,
+                label: Text('Internet'),
+                icon: Icon(Icons.public),
+              ),
             ],
-            selected: {_urlCtrl.text.startsWith('https://') ? _tunnel : _tailnet},
+            selected: {
+              _urlCtrl.text.startsWith('https://') ? _tunnel : _tailnet,
+            },
             onSelectionChanged: (sel) =>
                 setState(() => _urlCtrl.text = sel.first),
           ),
@@ -93,10 +113,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             maxLines: null,
           ),
           const SizedBox(height: 20),
-          Text('Cloudflare Access', style: Theme.of(context).textTheme.titleSmall),
-          const Text(
-            'Potreba jen pro ugc.ol1n.com (pristup bez Tailscale).',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+          Text(
+            'Cloudflare Access',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          Text(
+            l.cfAccessHelp,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -122,9 +145,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onPressed: _testing ? null : _save,
             icon: _testing
                 ? const SizedBox(
-                    width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.save),
-            label: const Text('Ulozit a otestovat'),
+            label: Text(l.saveAndTest),
           ),
           if (_status != null)
             Padding(

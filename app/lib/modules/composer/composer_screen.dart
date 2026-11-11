@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Batch Composer: matice kategorie x prompt -> POST /generate per kombinace.
 /// Styl a kolekce drzi vizualni jednotu (style-lock kolekce).
@@ -15,13 +16,23 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
   // Produkci overene kategorie napred (smoke test 2026-08-21); hair je
   // zname riziko - Illustrious neumi vlasy bez hlavy.
   static const categories = [
-    ('helmet', 'Helma', true),
-    ('back', 'Kridla / zada', true),
-    ('sword', 'Mec', true),
-    ('front', 'Hrudni plat', false),
-    ('hat', 'Cepice', false),
-    ('hair', 'Vlasy (riziko)', false),
+    ('helmet', true),
+    ('back', true),
+    ('sword', true),
+    ('front', false),
+    ('hat', false),
+    ('hair', false),
   ];
+
+  static String _categoryLabel(AppLocalizations l, String key) => switch (key) {
+    'helmet' => l.catHelmet,
+    'back' => l.catBack,
+    'sword' => l.catSword,
+    'front' => l.catFront,
+    'hat' => l.catHat,
+    'hair' => l.catHair,
+    _ => key,
+  };
 
   static const stylePresets = [
     'cyberpunk neon',
@@ -92,14 +103,16 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
     }
     setState(() => _sending = false);
     if (!mounted) return;
+    final l = AppLocalizations.of(context);
     final msg = errors.isEmpty
-        ? 'Odeslano $sent jobu - Spark generuje (~4 min/kus, serializovane)'
-        : 'Odeslano $sent, chyby: ${errors.join('; ')}';
+        ? l.composerSent(sent)
+        : l.composerSentErrors(sent, errors.join('; '));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final total = _selected.length * _variants;
     return Scaffold(
       appBar: AppBar(title: const Text('Batch Composer')),
@@ -108,21 +121,24 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
         children: [
           TextField(
             controller: _promptCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Prompt itemu',
+            decoration: InputDecoration(
+              labelText: l.promptLabel,
               hintText: 'ornate samurai {category} with neon accents',
               border: OutlineInputBorder(),
             ),
             maxLines: 2,
           ),
           const SizedBox(height: 16),
-          Text('Kategorie', style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            l.categoriesLabel,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           Wrap(
             spacing: 8,
             children: [
-              for (final (key, label, ready) in categories)
+              for (final (key, ready) in categories)
                 FilterChip(
-                  label: Text(label),
+                  label: Text(_categoryLabel(l, key)),
                   avatar: ready ? const Icon(Icons.verified, size: 16) : null,
                   selected: _selected.contains(key),
                   onSelected: (sel) => setState(() {
@@ -134,18 +150,19 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
           const SizedBox(height: 16),
           DropdownMenu<String>(
             initialSelection: _style,
-            label: const Text('Styl'),
+            label: Text(l.styleLabel),
             expandedInsets: EdgeInsets.zero,
             dropdownMenuEntries: [
-              for (final s in stylePresets) DropdownMenuEntry(value: s, label: s),
+              for (final s in stylePresets)
+                DropdownMenuEntry(value: s, label: s),
             ],
             onSelected: (s) => setState(() => _style = s ?? _style),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _collectionCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Kolekce',
+            decoration: InputDecoration(
+              labelText: l.collectionLabel,
               hintText: 'Samurai Neon',
               border: OutlineInputBorder(),
             ),
@@ -156,16 +173,17 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
           // pri konverzi predni vysec otoci dokola - viz convert.py.
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Zdobeni dokola'),
-            subtitle: const Text('radialni symetrie - dorty, korunky'),
+            title: Text(l.radialTitle),
+            subtitle: Text(l.radialSubtitle),
             value: _radial,
             onChanged: (v) => setState(() => _radial = v),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Text('Varianty na kategorii: $_variants'),
+              Flexible(flex: 2, child: Text(l.variantsPerCategory(_variants))),
               Expanded(
+                flex: 3,
                 child: Slider(
                   value: _variants.toDouble(),
                   min: 1,
@@ -181,11 +199,12 @@ class _ComposerScreenState extends ConsumerState<ComposerScreen> {
             onPressed: _sending || total == 0 ? null : _submit,
             icon: _sending
                 ? const SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.rocket_launch),
-            label: Text('Vygenerovat $total ${total == 1 ? "item" : "itemy"}'
-                ' (~${(total * 4)} min)'),
+            label: Text(l.generateItems(total, total * 4)),
           ),
         ],
       ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models.dart';
 import '../../core/pipeline.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 import '../review/review_screen.dart';
 
 /// Zivy prehled fronty: joby seskupene podle stavu, SSE drzi data cerstva.
@@ -11,16 +12,24 @@ class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
 
   static const _order = [
-    'new', 'remeshing', 'approved', 'converting', 'converted', 'packed',
-    'failed', 'rejected', 'rerolled',
+    'new',
+    'remeshing',
+    'approved',
+    'converting',
+    'converted',
+    'packed',
+    'failed',
+    'rejected',
+    'rerolled',
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final jobsAsync = ref.watch(jobsProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Fronta'),
+        title: Text(l.navQueue),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -30,7 +39,7 @@ class QueueScreen extends ConsumerWidget {
       ),
       body: jobsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('NAS nedostupny: $e')),
+        error: (e, _) => Center(child: Text(l.nasUnavailable('$e'))),
         data: (jobs) {
           final byStatus = <String, List<Job>>{};
           for (final j in jobs) {
@@ -38,13 +47,15 @@ class QueueScreen extends ConsumerWidget {
           }
           final sections = _order.where(byStatus.containsKey).toList();
           if (sections.isEmpty) {
-            return ListView(children: const [
-              _SparkSection(),
-              Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: Text('Na NASu zatim nic - posli batch v Composeru.')),
-              ),
-            ]);
+            return ListView(
+              children: [
+                const _SparkSection(),
+                Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(child: Text(l.queueEmpty)),
+                ),
+              ],
+            );
           }
           return RefreshIndicator(
             onRefresh: () => ref.read(jobsProvider.notifier).refresh(),
@@ -55,7 +66,7 @@ class QueueScreen extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                     child: Text(
-                      '${_label(status)} (${byStatus[status]!.length})',
+                      '${_label(l, status)} (${byStatus[status]!.length})',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
@@ -70,18 +81,18 @@ class QueueScreen extends ConsumerWidget {
     );
   }
 
-  static String _label(String s) => switch (s) {
-        'new' => 'Ceka na triage',
-        'remeshing' => 'Prepocitava se v TRELLIS (~4 min)',
-        'approved' => 'Ve fronte na konverzi',
-        'converting' => 'Konvertuje se',
-        'converted' => 'Zkonvertovano - ceka na 3D review',
-        'packed' => 'Zabaleno pro Studio',
-        'failed' => 'Selhalo',
-        'rejected' => 'Zamitnuto',
-        'rerolled' => 'Rerollnuto',
-        _ => s,
-      };
+  static String _label(AppLocalizations l, String s) => switch (s) {
+    'new' => l.stNew,
+    'remeshing' => l.stRemeshing,
+    'approved' => l.stApproved,
+    'converting' => l.stConverting,
+    'converted' => l.stConverted,
+    'packed' => l.stPacked,
+    'failed' => l.stFailed,
+    'rejected' => l.stRejected,
+    'rerolled' => l.stRerolled,
+    _ => s,
+  };
 }
 
 class _JobTile extends ConsumerWidget {
@@ -90,6 +101,7 @@ class _JobTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final api = ref.watch(apiProvider);
     final verdictColor = switch (job.verdict) {
       'PASS' => Colors.green,
@@ -98,9 +110,9 @@ class _JobTile extends ConsumerWidget {
       _ => null,
     };
     return ListTile(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ReviewScreen(job: job),
-      )),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => ReviewScreen(job: job))),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Image.network(
@@ -119,7 +131,7 @@ class _JobTile extends ConsumerWidget {
           job.collection,
           if (job.triCount != null) '${job.triCount} tris',
           if (job.error.isNotEmpty) job.error,
-          'klepni pro 3D',
+          l.tapFor3d,
         ].join(' - '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
@@ -138,10 +150,10 @@ class _JobTile extends ConsumerWidget {
             ),
           if (job.status == 'converted' || job.status == 'failed')
             IconButton(
-              tooltip: job.status == 'converted' ? 'Zabalit' : 'Zkusit znovu',
-              icon: Icon(job.status == 'converted'
-                  ? Icons.inventory_2
-                  : Icons.replay),
+              tooltip: job.status == 'converted' ? l.pack : l.retry,
+              icon: Icon(
+                job.status == 'converted' ? Icons.inventory_2 : Icons.replay,
+              ),
               onPressed: () async {
                 final action = job.status == 'converted'
                     ? api.approve(job.id)
@@ -150,8 +162,9 @@ class _JobTile extends ConsumerWidget {
                   await action;
                 } catch (e) {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text('$e')));
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('$e')));
                   }
                 }
                 ref.read(jobsProvider.notifier).refresh();
@@ -163,7 +176,6 @@ class _JobTile extends ConsumerWidget {
   }
 }
 
-
 /// Joby, ktere se prave vari na Sparku. Na NAS dorazi az hotove, takze
 /// bez teto sekce appka behem generovani (~4 min) neukazuje nic.
 class _SparkSection extends ConsumerWidget {
@@ -171,6 +183,7 @@ class _SparkSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final jobs = ref.watch(pipelineJobsProvider).value ?? const <PipelineJob>[];
     if (jobs.isEmpty) return const SizedBox.shrink();
     return Column(
@@ -178,17 +191,20 @@ class _SparkSection extends ConsumerWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: Text('Vyrabi se na Sparku (${jobs.length})',
-              style: Theme.of(context).textTheme.titleMedium),
+          child: Text(
+            l.sparkSection(jobs.length),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
         for (final j in jobs)
           ListTile(
             leading: const SizedBox(
-              width: 28, height: 28,
+              width: 28,
+              height: 28,
               child: CircularProgressIndicator(strokeWidth: 2.5),
             ),
             title: Text(j.prompt, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${j.category} - ${j.stageLabel}'),
+            subtitle: Text('${j.category} - ${j.stageLabel(l)}'),
           ),
         const Divider(height: 24),
       ],

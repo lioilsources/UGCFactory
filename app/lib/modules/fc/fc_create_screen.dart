@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/fc_models.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Zalozeni postavy: obrazek, jmeno, vyber klipu.
 ///
@@ -92,9 +93,10 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final animations = ref.watch(fcAnimationsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Nova postava')),
+      appBar: AppBar(title: Text(l.newCharacter)),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(12),
         child: FilledButton.icon(
@@ -106,7 +108,7 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.auto_awesome),
-          label: Text(_busy ? 'Zakladam...' : 'Vygenerovat'),
+          label: Text(_busy ? l.creating : l.generate),
         ),
       ),
       body: ListView(
@@ -120,8 +122,8 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _name,
-            decoration: const InputDecoration(
-              labelText: 'Jmeno',
+            decoration: InputDecoration(
+              labelText: l.nameLabel,
               border: OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
@@ -129,15 +131,14 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
           SwitchListTile(
             value: _autoAPose,
             onChanged: (v) => setState(() => _autoAPose = v),
-            title: const Text('Pripravit fotku'),
-            subtitle: const Text(
-              'Odstrani pozadi; kdyz jsou ruce prilepene k telu, odtahne je '
-              'do A-pozy, a kdyz chybi nohy pod kotniky, domysli je. Bez '
-              'toho rig u srostlych koncetin casto selze.',
-            ),
+            title: Text(l.prepPhoto),
+            subtitle: Text(l.prepPhotoHelp),
           ),
           const Divider(),
-          Text('Animace', style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            l.animationsLabel,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           const SizedBox(height: 8),
           animations.when(
             loading: () => const Center(
@@ -146,12 +147,9 @@ class _FcCreateScreenState extends ConsumerState<FcCreateScreen> {
                 child: CircularProgressIndicator(),
               ),
             ),
-            error: (e, _) => Text('Knihovnu se nepodarilo nacist: $e'),
+            error: (e, _) => Text(l.libraryLoadFailed('$e')),
             data: (list) => list.isEmpty
-                ? const Text(
-                    'Knihovna je prazdna. Klipy se registruji skriptem '
-                    'seed_animlib.py na NASu.',
-                  )
+                ? Text(l.libraryEmpty)
                 : _AnimationPicker(
                     animations: list,
                     selected: _selected,
@@ -209,7 +207,7 @@ class _ImagePicker extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: onGallery,
                 icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Galerie'),
+                label: Text(AppLocalizations.of(context).gallery),
               ),
             ),
             const SizedBox(width: 8),
@@ -217,7 +215,7 @@ class _ImagePicker extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: onCamera,
                 icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Fotoaparat'),
+                label: Text(AppLocalizations.of(context).camera),
               ),
             ),
           ],

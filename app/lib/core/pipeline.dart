@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../l10n/app_localizations.dart';
 import 'providers.dart';
 
 /// Job, ktery se prave vari na Sparku (koncept -> cleanplate -> mesh).
@@ -44,25 +45,25 @@ class PipelineJob {
       stage == 'mesh' ||
       stage == 'push';
 
-  String get stageLabel => switch (stage) {
-        'queued' => 'ceka ve fronte',
-        'concept' => 'kresli koncept',
-        'cleanplate' => 'odmazava pozadi',
-        'mesh' => 'modeluje 3D (~4 min)',
-        'push' => 'posila na NAS',
-        'done' => 'hotovo',
-        'failed' => 'selhalo',
-        _ => stage,
-      };
+  String stageLabel(AppLocalizations l) => switch (stage) {
+    'queued' => l.sgQueued,
+    'concept' => l.sgConcept,
+    'cleanplate' => l.sgCleanplate,
+    'mesh' => l.sgMesh,
+    'push' => l.sgPush,
+    'done' => l.sgDone,
+    'failed' => l.sgFailed,
+    _ => stage,
+  };
 
   int get stageIndex => switch (stage) {
-        'queued' => 0,
-        'concept' => 1,
-        'cleanplate' => 2,
-        'mesh' => 3,
-        'push' => 4,
-        _ => 5,
-      };
+    'queued' => 0,
+    'concept' => 1,
+    'cleanplate' => 2,
+    'mesh' => 3,
+    'push' => 4,
+    _ => 5,
+  };
 }
 
 /// Poll kazdych 10 s - Spark nema SSE a stage se meni v minutach.

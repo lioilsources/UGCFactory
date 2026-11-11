@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/fc_models.dart';
 import '../../core/providers.dart';
+import '../../l10n/app_localizations.dart';
 import '../../shared/model_view.dart';
 import 'fc_list_screen.dart' show FcStatusBadge;
 
@@ -21,25 +22,23 @@ class _FcDetailScreenState extends ConsumerState<FcDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final detail = ref.watch(fcDetailProvider(widget.id));
     return Scaffold(
       appBar: AppBar(
-        title: Text(detail.valueOrNull?.character.name ?? 'Postava'),
+        title: Text(detail.valueOrNull?.character.name ?? l.characterFallback),
         actions: [
           if (detail.valueOrNull?.hasModel ?? false)
             PopupMenuButton<String>(
               icon: const Icon(Icons.ios_share),
               onSelected: (v) => _onAction(v, detail.value!),
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'glb', child: Text('Stahnout GLB')),
-                PopupMenuItem(value: 'fbx', child: Text('Stahnout FBX')),
-                PopupMenuItem(value: 'zip', child: Text('Stahnout vse (ZIP)')),
-                PopupMenuDivider(),
-                PopupMenuItem(
-                  value: 'roblox',
-                  child: Text('Poslat do Robloxu'),
-                ),
-                PopupMenuItem(value: 'luanti', child: Text('Poslat do Luanti')),
+              itemBuilder: (context) => [
+                PopupMenuItem(value: 'glb', child: Text(l.downloadGlb)),
+                PopupMenuItem(value: 'fbx', child: Text(l.downloadFbx)),
+                PopupMenuItem(value: 'zip', child: Text(l.downloadZip)),
+                const PopupMenuDivider(),
+                PopupMenuItem(value: 'roblox', child: Text(l.sendRoblox)),
+                PopupMenuItem(value: 'luanti', child: Text(l.sendLuanti)),
               ],
             ),
         ],
@@ -73,11 +72,12 @@ class _FcDetailScreenState extends ConsumerState<FcDetailScreen> {
   }
 
   Future<void> _onAction(String action, FcDetail d) async {
+    final l = AppLocalizations.of(context);
     final api = ref.read(fcApiProvider);
     if (action == 'roblox' || action == 'luanti') {
       try {
         await api.export(d.character.id, action);
-        _toast('Export do $action zarazen');
+        _toast(l.exportQueued(action));
         ref.invalidate(fcDetailProvider(widget.id));
       } on Object catch (e) {
         _toast('$e');
@@ -111,6 +111,7 @@ class _Body extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final api = ref.watch(fcApiProvider);
     final c = detail.character;
     return ListView(
@@ -129,7 +130,7 @@ class _Body extends ConsumerWidget {
               : _Pending(character: c, onRetry: onRetry),
         ),
         if (detail.clips.isNotEmpty) ...[
-          const _SectionTitle('Klipy'),
+          _SectionTitle(l.clipsTitle),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Wrap(
@@ -159,7 +160,7 @@ class _Body extends ConsumerWidget {
           ListTile(
             dense: true,
             leading: const Icon(Icons.error_outline, color: Colors.redAccent),
-            title: Text('${s.step} (pokus ${s.attempt})'),
+            title: Text(l.stepAttempt(s.step, s.attempt)),
             subtitle: Text(s.error),
           ),
         if (c.isFailed)
@@ -168,11 +169,11 @@ class _Body extends ConsumerWidget {
             child: FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Zkusit krok znovu'),
+              label: Text(l.retryStep),
             ),
           ),
         if (detail.exports.isNotEmpty) ...[
-          const _SectionTitle('Exporty'),
+          _SectionTitle(l.exportsTitle),
           for (final e in detail.exports)
             ListTile(
               dense: true,
@@ -217,7 +218,7 @@ class _Pending extends StatelessWidget {
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: onRetry,
-                  child: const Text('Zkusit znovu'),
+                  child: Text(AppLocalizations.of(context).retry),
                 ),
               ] else ...[
                 const CircularProgressIndicator(),
@@ -225,7 +226,9 @@ class _Pending extends StatelessWidget {
                 Text(character.status),
                 const SizedBox(height: 4),
                 Text(
-                  'krok ${character.step + 1} z ${FcCharacter.pipeline.length}',
+                  AppLocalizations.of(
+                    context,
+                  ).stepOf(character.step + 1, FcCharacter.pipeline.length),
                   style: const TextStyle(fontSize: 12, color: Colors.white54),
                 ),
               ],
