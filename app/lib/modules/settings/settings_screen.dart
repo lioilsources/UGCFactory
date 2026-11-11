@@ -20,7 +20,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _status;
   bool _testing = false;
 
-  static const _tailnet = 'http://joda.tailde0de8.ts.net:8095';
+  static const _tailnet = tailnetUrl;
   static const _tunnel = 'https://ugc.ol1n.com';
 
   @override

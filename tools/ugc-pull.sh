@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stahne zabalene itemy z ugc-api do ~/UGC/inbox/<id>/ pro import do Studia.
 #
-#   ./tools/ugc-pull.sh              # vse ve stavu packed
+#   UGC_API=http://<host>.<tailnet>.ts.net:8095 ./tools/ugc-pull.sh   # vse ve stavu packed
 #   ./tools/ugc-pull.sh <job-id>     # jeden konkretni
 #   UGC_API=https://ugc.ol1n.com ./tools/ugc-pull.sh   # pres tunel
 #
@@ -9,7 +9,7 @@
 #   export CF_CLIENT_ID=... CF_CLIENT_SECRET=...
 set -euo pipefail
 
-API="${UGC_API:-http://joda.tailde0de8.ts.net:8095}"
+API="${UGC_API:?set UGC_API (http://<host>.<tailnet>.ts.net:8095 or https://ugc.ol1n.com)}"
 DEST="${UGC_INBOX:-$HOME/UGC/inbox}"
 
 # Pozor: macOS ma bash 3.2, kde "${AUTH[@]}" na prazdnem poli pod set -u

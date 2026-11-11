@@ -58,7 +58,7 @@ make test            # Go testy + flutter test
 
 | Kudy | Adresa | Podmínka |
 |---|---|---|
-| mobil / prohlížeč | `http://joda.tailde0de8.ts.net:8095/app/` | zapnutý Tailscale |
+| mobil / prohlížeč | `http://<host>.<tailnet>.ts.net:8095/app/` | zapnutý Tailscale |
 | odkudkoli | `https://ugc.ol1n.com/app/` | přihlášení přes Cloudflare Access |
 | nativní Android / iOS | `make app-android` / `make app-ios` | připojený telefon |
 

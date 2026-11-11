@@ -67,7 +67,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>UGC Studio mluvi s ugc-api na NAS v lokalni siti (192.168.88.88).</string>
+	<string>UGC Studio mluvi s ugc-api na NAS v lokalni siti.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- ugc-api bezi po tailnetu/LAN bez TLS.

@@ -17,7 +17,7 @@ services:
     environment:
       - UGC_ADDR=:8092
       - UGC_COMFY_URL=${UGC_COMFY_URL:-http://host.docker.internal:8188}
-      - UGC_NAS_URL=${UGC_NAS_URL:-http://192.168.88.88:8095}
+      - UGC_NAS_URL=${UGC_NAS_URL:?set UGC_NAS_URL (http://<nas-host>:8095) in the environment or .env}
       - UGC_CHECKPOINT=${UGC_CHECKPOINT:-Illustrious-XL-v2.0.safetensors}
       - UGC_SPOOL=/spool
       - UGC_QUEUE=/spool/queue

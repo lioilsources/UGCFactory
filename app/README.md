@@ -13,7 +13,7 @@ Flutter (macOS/iOS/Android), Riverpod, go_router — M1 z UGC_STUDIO_APP_PLAN.
   z ní jde zabalit `converted` a retrynout `failed`.
 - **Triage** — swipe: doprava approve (→ Blender konverze), doleva reject,
   kostka = reroll (stejný prompt, nový seed).
-- **Nastavení** — URL API (LAN `http://192.168.88.88:8095`, později tunnel).
+- **Nastavení** — URL API (tailnet `http://<host>.<tailnet>.ts.net:8095` nebo tunnel `https://ugc.ol1n.com`).
 
 ## Spuštění
 
