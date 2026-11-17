@@ -61,7 +61,7 @@ app-android:
 	cd app && flutter build apk --release $(DART_DEFINES) && flutter install -d $(PIXEL) --release
 
 # iOS jde nasadit i bezdratove (zarizeni sparovane pres Xcode). Podepisuje
-# se automaticky tymem P82HWPG7FN z Runner.xcodeproj.
+# se automaticky tymem z Xcode projektu (APPLE_TEAM_ID).
 IPHONE ?= 00008101-001175D90AA0001E
 app-ios:
 	cd app && flutter build ios --release $(DART_DEFINES) && flutter install -d $(IPHONE) --release

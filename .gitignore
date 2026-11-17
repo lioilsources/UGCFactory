@@ -3,3 +3,19 @@ nas/web/
 .DS_Store
 app/.cf-token
 nas/ugc-backend
+# devconv:start
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.jks
+key.properties
+.claude/settings.local.json
+CLAUDE.local.md
+# devconv:end
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+lib/**/secrets.dart
