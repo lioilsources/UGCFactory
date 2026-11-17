@@ -20,7 +20,7 @@ TestFlightu dosáhla na `ugc.ol1n.com`.
 5. Nastavit GitHub secrets:
    ```bash
    export BW_SESSION=$(bw unlock --raw)
-   cd /Volumes/YOTTA/Dev/Distribution
+   cd $DEV_ROOT/Distribution
    ./scripts/setup-gh-secrets.sh --repo lioilsources/UGCFactory --app UGCFactory
    ```
 6. Přidat dva secrets navíc, které skript nezná (Access token pro API):
